@@ -54,7 +54,7 @@ autocmd BufRead,BufNewFile *.v.mako set filetype=verilog
 autocmd BufRead,BufNewFile *.sv.mako set filetype=verilog
 
 set t_Co=256
-colo mayansmoke
+colo blue
 " YCM options 
 "Disable YCM
 "let g:loaded_youcompleteme = 1
