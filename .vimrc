@@ -44,6 +44,8 @@ set rtp+=~/.vim/bundle/nerdtree
  " Put your non-Plugin stuff after this line
 
 set tags=tags;
+"Enable Tlist toggle with F8
+nnoremap <silent> <F8> :TlistToggle<CR>
 filetype plugin indent on
 syntax on
 autocmd BufRead,BufNewFile *.cl set filetype=c
