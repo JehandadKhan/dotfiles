@@ -113,9 +113,12 @@ if ! shopt -oq posix; then
   fi
 fi
 alias vi='vim'
-export PATH=$PATH:/home/jehandad/xilinx/Vivado_HLS/2016.3/bin:/home/jehandad/xilinx/Vivado/2016.1/bin
-alias cdp='cd /mnt/c/dev/ccmp4'
-export PICOBASE=/mnt/c/dev/picocomputing-5.5.0.0
+export PATH=$PATH:/opt/system/software/Xilinx/Vivado_HLS/2016.3/bin:/opt/system/software/Xilinx/Vivado/2016.1/bin
+export PICOBASE=/home/jehandad/dev/svn/micron_hmc/branches/picocomputing-5.5.0.0
+alias cdp='cd ~/dev/ccmp4'
+#export PATH=$PATH:/home/jehandad/xilinx/Vivado_HLS/2016.3/bin:/home/jehandad/xilinx/Vivado/2016.1/bin
+#alias cdp='cd /mnt/c/dev/ccmp4'
+#export PICOBASE=/mnt/c/dev/picocomputing-5.5.0.0
 alias rm='trash'
 #Turn off the annoying beep
 setterm -blength 0

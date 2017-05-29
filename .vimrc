@@ -53,6 +53,7 @@ autocmd BufRead,BufNewFile *.p4 set filetype=c
 autocmd BufRead,BufNewFile *.sv set filetype=verilog
 autocmd BufRead,BufNewFile *.vh set filetype=verilog
 autocmd BufRead,BufNewFile *.cpp.mako set filetype=cpp
+autocmd BufRead,BufNewFile *.h.mako set filetype=h
 autocmd BufRead,BufNewFile *.v.mako set filetype=verilog
 autocmd BufRead,BufNewFile *.sv.mako set filetype=verilog
 
