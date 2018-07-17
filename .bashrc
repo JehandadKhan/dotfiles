@@ -113,12 +113,26 @@ if ! shopt -oq posix; then
   fi
 fi
 alias vi='vim'
-export PATH=$PATH:/opt/system/software/Xilinx/Vivado_HLS/2016.3/bin:/opt/system/software/Xilinx/Vivado/2016.1/bin
-export PICOBASE=/home/jehandad/dev/svn/micron_hmc/branches/picocomputing-5.5.0.0
-alias cdp='cd ~/dev/ccmp4'
+#export PATH=$PATH:/opt/system/software/Xilinx/Vivado_HLS/2016.3/bin:/opt/system/software/Xilinx/Vivado/2016.1/bin
+export PATH=/opt/rocm/bin:$PATH
+export PATH=/opt/rocm/hcc/bin:$PATH 
+#export PICOBASE=/home/jehandad/dev/svn/micron_hmc/branches/picocomputing-5.5.0.0
+#alias cdp='cd ~/dev/ccmp4'
 #export PATH=$PATH:/home/jehandad/xilinx/Vivado_HLS/2016.3/bin:/home/jehandad/xilinx/Vivado/2016.1/bin
 #alias cdp='cd /mnt/c/dev/ccmp4'
 #export PICOBASE=/mnt/c/dev/picocomputing-5.5.0.0
 alias rm='trash'
-#Turn off the annoying beep
-setterm -blength 0
+# Triggers the bash-completion bug in make files
+#alias grep='grep --color=always'
+alias grep='grep --color=auto'
+function setclocks(){
+    rocm-smi --setmclk=3
+    rocm-smi --setsclk=7
+    rocm-smi --setfan 200
+    rocm-smi -a
+}
+alias cmk_ocl='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" -D_GLIBCXX_DEBUG  ..'
+alias cmk_hip='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="HIP" -DMIOPEN_CACHE_DIR="" -D_GLIBCXX_DEBUG ..'
+alias tmad='tmux a -d'
+alias mj='make -j'
+alias md='make -j MIOpenDriver'
