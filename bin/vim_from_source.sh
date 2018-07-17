@@ -24,7 +24,8 @@ cd vim
 							--enable-gui=gtk2 \
 							--enable-cscope \
 							--prefix=/usr/local
-make VIMRUNTIMEDIR=/usr/local/share/vim/vim80
+# make VIMRUNTIMEDIR=/usr/local/share/vim/vim80
+make -j 
 
 sudo apt install checkinstall
 cd ~/vim
