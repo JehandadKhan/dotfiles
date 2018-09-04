@@ -131,8 +131,13 @@ function setclocks(){
     rocm-smi --setfan 200
     rocm-smi -a
 }
-alias cmk_ocl='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" -D_GLIBCXX_DEBUG  ..'
-alias cmk_hip='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="HIP" -DMIOPEN_CACHE_DIR="" -D_GLIBCXX_DEBUG ..'
+function resetclocks(){
+    rocm-smi --resetclocks
+    rocm-smi --resetfans
+}
+alias cmk_dbg_ocl='cmake -DCMAKE_CXX_FLAGS=-D_GLIBCXX_DEBUG -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR=""  ..'
+alias cmk_ocl='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" ..'
+alias cmk_hip='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="HIP" -DMIOPEN_CACHE_DIR="" ..'
 alias tmad='tmux a -d'
 alias mj='make -j'
 alias md='make -j MIOpenDriver'

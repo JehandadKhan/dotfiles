@@ -18,6 +18,7 @@ Plugin 'vim-airline/vim-airline'
 Plugin 'jreybert/vimagit'
 Plugin 'rdnetto/YCM-Generator'
 Plugin 'ctrlpvim/ctrlp.vim'
+Plugin 'will133/vim-dirdiff'
 call vundle#end()
 "Disable YCM:
 "let g:loaded_youcompleteme = 1
