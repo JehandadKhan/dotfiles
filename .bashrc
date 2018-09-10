@@ -143,3 +143,4 @@ alias cmk_hip='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUI
 alias tmad='tmux a -d'
 alias mj='make -j'
 alias md='make -j MIOpenDriver'
+alias cdv='cd /Users/jehandad/remote/vega/home/jehandad'
