@@ -116,6 +116,7 @@ alias vi='vim'
 #export PATH=$PATH:/opt/system/software/Xilinx/Vivado_HLS/2016.3/bin:/opt/system/software/Xilinx/Vivado/2016.1/bin
 export PATH=/opt/rocm/bin:$PATH
 export PATH=/opt/rocm/hcc/bin:$PATH 
+export PATH=$HOME/dotfiles/bin:$PATH
 #export PICOBASE=/home/jehandad/dev/svn/micron_hmc/branches/picocomputing-5.5.0.0
 #alias cdp='cd ~/dev/ccmp4'
 #export PATH=$PATH:/home/jehandad/xilinx/Vivado_HLS/2016.3/bin:/home/jehandad/xilinx/Vivado/2016.1/bin
@@ -135,9 +136,12 @@ function resetclocks(){
     rocm-smi --resetclocks
     rocm-smi --resetfans
 }
+export DOTFILES=$HOME/dotfiles
 alias cmk_dbg_ocl='cmake -DCMAKE_CXX_FLAGS=-D_GLIBCXX_DEBUG -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR=""  ..'
 alias cmk_ocl='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" ..'
 alias cmk_hip='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="HIP" -DMIOPEN_CACHE_DIR="" ..'
 alias tmad='tmux a -d'
 alias mj='make -j'
 alias md='make -j MIOpenDriver'
+alias cdv='cd /Users/jehandad/remote/vega/home/jehandad'
+alias cdvml='cd /Users/jehandad/remote/vega/home/jehandad/MLOpen'
