@@ -145,3 +145,7 @@ alias mj='make -j'
 alias md='make -j MIOpenDriver'
 alias cdv='cd /Users/jehandad/remote/vega/home/jehandad'
 alias cdvml='cd /Users/jehandad/remote/vega/home/jehandad/MLOpen'
+export PATH="/usr/local/opt/llvm/bin:$PATH"
+
+# Enable bash-completion on mac
+[ -f /usr/local/etc/bash_completion ] && . /usr/local/etc/bash_completion
