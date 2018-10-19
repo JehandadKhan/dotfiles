@@ -5,9 +5,12 @@
 	tool = vimdiff
 [difftool]
 	prompt = false
+	trustExitCode = true
 [alias]
 	d = difftool
 [push]
 	default = simple
 [core]
 	editor = vim
+[mergetool]
+	trustExitCode = true
