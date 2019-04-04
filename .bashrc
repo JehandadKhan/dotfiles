@@ -71,6 +71,23 @@ xterm*|rxvt*)
 *)
     ;;
 esac
+PS1='[\u@\h \W$(__docker_machine_ps1)]\$ '
+
+# get current branch in git repo
+function parse_git_branch() {
+    BRANCH=`git branch 2> /dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/\1/'`
+    if [ ! "${BRANCH}" == "" ]
+    then
+        echo "[${BRANCH}]"
+    else
+        echo ""
+    fi
+}
+ 
+
+# PROMPT_BRANCH='$(parse_git_branch)'
+# PS1='${PROMPT_BRANCH}${PS1}'
+
 #export PS1=`hotname`$
 # enable color support of ls and also add handy aliases
 if [ -x /usr/bin/dircolors ]; then
@@ -137,15 +154,16 @@ function resetclocks(){
     rocm-smi --resetfans
 }
 export DOTFILES=$HOME/dotfiles
-alias cmk_dbg_ocl='cmake -DCMAKE_CXX_FLAGS=-D_GLIBCXX_DEBUG -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR=""  ..'
-alias cmk_ocl='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" ..'
-alias cmk_hip='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="HIP" -DMIOPEN_CACHE_DIR="" ..'
+alias cmk_dbg_ocl='cmake -DCMAKE_CXX_FLAGS=-D_GLIBCXX_DEBUG -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" _DCMAKE_PREFIX_PATH=../deps  ..'
+alias cmk_ocl='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" -DCMAKE_PREFIX_PATH=../deps ..'
+alias cmk_hip='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="HIP" -DMIOPEN_CACHE_DIR="" -DCMAKE_PREFIX_PATH=../deps ..'
 alias tmad='tmux a -d'
 alias mj='make -j'
 alias md='make -j MIOpenDriver'
 alias cdv='cd /Users/jehandad/remote/vega/home/jehandad'
 alias cdvml='cd /Users/jehandad/remote/vega/home/jehandad/MLOpen'
 export PATH="/usr/local/opt/llvm/bin:$PATH"
+alias tmux='tumx -CC'
 
 # Enable bash-completion on mac
 [ -f /usr/local/etc/bash_completion ] && . /usr/local/etc/bash_completion
