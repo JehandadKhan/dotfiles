@@ -71,7 +71,7 @@ xterm*|rxvt*)
 *)
     ;;
 esac
-PS1='[\u@\h \W$(__docker_machine_ps1)]\$ '
+# PS1='[\u@\h \W$(__docker_machine_ps1)]\$ '
 
 # get current branch in git repo
 function parse_git_branch() {
