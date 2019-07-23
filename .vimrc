@@ -7,22 +7,54 @@ call vundle#begin()
 Plugin 'gmarik/Vundle.vim'
 "Plugin 'ervandew/supertab'
 Plugin 'Valloric/YouCompleteMe'
+" Plugin to show the bar on the right with class outline
 Plugin 'majutsushi/tagbar'
+" File browser
 Plugin 'scrooloose/nerdtree'
+" The unite plugin, also required by codequery
 Plugin 'Shougo/unite.vim'
+" For the vim-codequery plugin -- based on cscope/ctags (when YCM fails)
 Plugin 'devjoe/vim-codequery'
-Plugin 'mileszs/ack.vim'
+" Plugin 'mileszs/ack.vim'
+" for vim version < 8.0
+" Plugin 'tpope/vim-dispatch'
 Plugin 'flazz/vim-colorschemes'
-Plugin 'BufOnly'
+" Plugin 'BufOnly'
+" Plugin for status bar updates
 Plugin 'vim-airline/vim-airline'
+Plugin 'vim-airline/vim-airline-themes'
+" git integration for vim
 Plugin 'jreybert/vimagit'
-Plugin 'rdnetto/YCM-Generator'
+" vim-fugitive by tpope - very popular with airline integration
+Plugin 'tpope/vim-fugitive'
+" code completion
 Plugin 'ctrlpvim/ctrlp.vim'
 Plugin 'will133/vim-dirdiff'
+" vimproc is required by vebugger
+Plugin 'Shougo/vimproc.vim'
+" code debugger, tried vim-lldb but does not work
+" Plugin 'idanarye/vim-vebugger'
+Plugin 'sakhnik/nvim-gdb', { 'branch': 'legacy' }
+" Comment lines of code
+Plugin 'tpope/vim-commentary'
 call vundle#end()
-"Disable YCM:
-"let g:loaded_youcompleteme = 1
- filetype plugin indent on    " required
+" Set the following option to one to Disable YCM:
+" let g:loaded_youcompleteme = 1
+" Options for vim-rtags
+" Use quickfix window instead of location list
+let g:rtagsUseLocationList = 0
+" end options for vim-rtags
+" Options for vim-codequery
+let g:codequery_trigger_build_db_when_db_not_found = 1
+"Bind F10 to CodeQuery Unite Magic window
+nmap <F10> :CodeQueryMenu Unite Magic<CR>
+nmap <Leader>x :CodeQuery<CR>
+" End options for vim-codequery
+" Bindings for CtrlP
+let g:ctrlp_map = '<c-p>'
+let g:ctrlp_cmd = 'CtrlP'
+" End Bindings for CtrlP
+filetype plugin indent on    " required
  " To ignore plugin indent changes, instead use:
  "filetype plugin on
  "
@@ -41,12 +73,9 @@ set tags=tags;
 nmap <F8> :TagbarToggle<CR>
 "Bind F9 to NERDTree
 nmap <F9> :NERDTreeToggle<CR>
-"Bind F10 to CodeQuery Unite Magic window
-nmap <F10> :CodeQueryMenu Unite Magic<CR>
-
-nmap <Leader>x :CodeQuery<CR>
 nmap <Leader>T :YcmCompleter GetType<CR>
 nmap <Leader>F :YcmCompleter FixIt<CR>
+nmap <Leader>R :redraw!<CR>
 "Autostart NerdTree with Vim
 "autocmd vimenter * NERDTree
 "Autostart the code completer unite magic
@@ -62,21 +91,22 @@ autocmd BufRead,BufNewFile *.cpp.mako set filetype=cpp
 autocmd BufRead,BufNewFile *.h.mako set filetype=h
 autocmd BufRead,BufNewFile *.v.mako set filetype=verilog
 autocmd BufRead,BufNewFile *.sv.mako set filetype=verilog
+autocmd BufRead,BufNewFile *.hip set filetype=cpp
 
 set t_Co=256
 colo Benokai
 " YCM options 
+" disable YCM 
+let g:loaded_youcompleteme = 1
 " Allow YCM to populate location list with errors in the current file
-let g:ycm_always_populate_location_list = 1
-"Disable YCM
-"let g:loaded_youcompleteme = 1
+"let g:ycm_always_populate_location_list = 1
 "let g:ycm_global_ycm_extra_conf = '/home/jehandad/.vim/bundle/YouCompleteMe/.ycm_global_ycm_extra_conf.py'
 "set completeopt -=preview
 "let g:ycm_add_preview_to_completeopt = 1
-let g:ycm_autoclose_preview_window_after_insertion = 1
+"let g:ycm_autoclose_preview_window_after_insertion = 1
 "let g:ycm_key_list_select_completion = ['<TAB>', '<Down>']
 ""Turn off the line by line compile error report (set to zero)
-let g:ycm_show_diagnostics_ui = 1
+"let g:ycm_show_diagnostics_ui = 1
 ""Enable collection of tags from ctags
 "let g:ycm_collect_identifiers_from_tags_file = 1
 

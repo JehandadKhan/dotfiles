@@ -1,7 +1,6 @@
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
 # for examples
-
 # If not running interactively, don't do anything
 case $- in
     *i*) ;;
@@ -154,16 +153,33 @@ function resetclocks(){
     rocm-smi --resetfans
 }
 export DOTFILES=$HOME/dotfiles
-alias cmk_dbg_ocl='cmake -DCMAKE_CXX_FLAGS=-D_GLIBCXX_DEBUG -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" _DCMAKE_PREFIX_PATH=../deps  ..'
-alias cmk_ocl='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" -DCMAKE_PREFIX_PATH=../deps ..'
-alias cmk_hip='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="HIP" -DMIOPEN_CACHE_DIR="" -DCMAKE_PREFIX_PATH=../deps ..'
-alias tmad='tmux a -d'
+alias cmk_dbg_ocl='cmake -DCMAKE_CXX_FLAGS=-D_GLIBCXX_DEBUG -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" _DCMAKE_PREFIX_PATH=/home/jehandad/deps  ..'
+alias cmk_ocl='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="OpenCL" -DMIOPEN_CACHE_DIR="" -DCMAKE_PREFIX_PATH=/home/jehandad/deps ..'
+alias cmk_hip='cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DBUILD_DEV="ON" -DCMAKE_BUILD_TYPE="Debug" -DMIOPEN_BACKEND="HIP" -DMIOPEN_CACHE_DIR="" -DCMAKE_PREFIX_PATH=/home/jehandad/deps ..'
+alias tmad='tmux -CC a -d'
 alias mj='make -j'
 alias md='make -j MIOpenDriver'
 alias cdv='cd /Users/jehandad/remote/vega/home/jehandad'
 alias cdvml='cd /Users/jehandad/remote/vega/home/jehandad/MLOpen'
 export PATH="/usr/local/opt/llvm/bin:$PATH"
 alias tmux='tmux -CC'
-
+# alias for docker 
+alias drun="sudo docker run -it -v $HOME:/data --privileged --rm --device=/dev/kfd --device /dev/dri:/dev/dri:rw --volume /dev/dri:/dev/dri:rw -v /var/lib/docker/:/var/lib/docker --group-add video"
 # Enable bash-completion on mac
 [ -f /usr/local/etc/bash_completion ] && . /usr/local/etc/bash_completion
+
+# >>> conda initialize >>>
+# !! Contents within this block are managed by 'conda init' !!
+# __conda_setup="$('/home/jehandad/anaconda3/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+# if [ $? -eq 0 ]; then
+#     eval "$__conda_setup"
+# else
+#     if [ -f "/home/jehandad/anaconda3/etc/profile.d/conda.sh" ]; then
+#         . "/home/jehandad/anaconda3/etc/profile.d/conda.sh"
+#     else
+#         export PATH="/home/jehandad/anaconda3/bin:$PATH"
+#     fi
+# fi
+# unset __conda_setup
+# <<< conda initialize <<<
+
