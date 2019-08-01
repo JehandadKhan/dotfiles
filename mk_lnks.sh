@@ -8,3 +8,4 @@ done
 echo "Cloning Vundle"
 git clone https://github.com/VundleVim/Vundle.vim.git ~/.vim/bundle/Vundle.vim
 sudo apt install trash-cli
+sudo apt install exuberant-ctags
