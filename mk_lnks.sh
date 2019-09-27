@@ -1,5 +1,6 @@
 #!/bin/bash
-apt install sudo
+sudo apt update
+sudo apt install vim
 for f in $(find . -maxdepth 1 ! -name '*.swp' ! -name '.gitignore' ! -name '.git' ! -name '.' -name '.*' -exec basename {} \;); do
 		echo "ln -s $(pwd)/$f  $HOME/$f  "
 		rm -rf $HOME/$f
