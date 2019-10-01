@@ -164,7 +164,7 @@ alias cdvml='cd /Users/jehandad/remote/vega/home/jehandad/MLOpen'
 export PATH="/usr/local/opt/llvm/bin:$PATH"
 alias tmux='tmux -CC'
 # alias for docker 
-alias drun="sudo docker run -it -v $HOME:/data --privileged --rm --device=/dev/kfd --device /dev/dri:/dev/dri:rw --volume /dev/dri:/dev/dri:rw -v /var/lib/docker/:/var/lib/docker --group-add video"
+alias drun="sudo docker run -it -v $HOME:/data --privileged --device=/dev/kfd --device /dev/dri:/dev/dri:rw --volume /dev/dri:/dev/dri:rw -v /var/lib/docker/:/var/lib/docker --group-add video"
 # Enable bash-completion on mac
 [ -f /usr/local/etc/bash_completion ] && . /usr/local/etc/bash_completion
 
