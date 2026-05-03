@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!-- Managed by install-lazyvim.sh: brew's imagemagick ships an empty
+     type.xml on macOS so SVG/text rendering fails with "unable to read
+     font ''". Registering a few macOS system fonts here gives magick a
+     working default. Read by ImageMagick via MAGICK_CONFIGURE_PATH set
+     in nvim's options.lua. -->
+<typemap>
+  <type format="ttc" name="Helvetica"   fullname="Helvetica"         family="Helvetica" foundry="Apple" weight="400" style="normal" stretch="normal" glyphs="/System/Library/Fonts/Helvetica.ttc" />
+  <type format="ttc" name="HelveticaB"  fullname="Helvetica Bold"    family="Helvetica" foundry="Apple" weight="700" style="normal" stretch="normal" glyphs="/System/Library/Fonts/Helvetica.ttc" />
+  <type format="ttc" name="HelveticaI"  fullname="Helvetica Oblique" family="Helvetica" foundry="Apple" weight="400" style="italic" stretch="normal" glyphs="/System/Library/Fonts/Helvetica.ttc" />
+  <type format="ttc" name="Menlo"       fullname="Menlo Regular"     family="Menlo"     foundry="Apple" weight="400" style="normal" stretch="normal" glyphs="/System/Library/Fonts/Menlo.ttc" />
+</typemap>
