@@ -31,3 +31,8 @@ autoload -Uz compinit
 compinit
 # End of Docker CLI completions
 [ -f "$HOME/.fzf.zsh" ] && source "$HOME/.fzf.zsh"
+
+# starship prompt — falls back silently to zsh's default prompt if not installed.
+if command -v starship >/dev/null 2>&1; then
+    eval "$(starship init zsh)"
+fi

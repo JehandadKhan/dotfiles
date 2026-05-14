@@ -122,3 +122,9 @@ alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e
 export PATH="$HOME/.local/bin:$PATH"
 
 [ -f "$HOME/.fzf.bash" ] && source "$HOME/.fzf.bash"
+
+# starship prompt — overrides the PS1 block above when installed.
+# Falls back silently to the stock PS1 if starship isn't on PATH.
+if command -v starship >/dev/null 2>&1; then
+    eval "$(starship init bash)"
+fi

@@ -1,0 +1,86 @@
+# ~/.config/starship.toml — chezmoi-managed.
+# Two-line prompt with nerd-font icons. Your terminal must use a nerd font
+# (e.g. JetBrainsMono Nerd Font, FiraCode Nerd Font) for icons to render.
+
+# $all expands to every default module, so we get language/runtime context
+# (python venv, node, go, rust, ...) without listing them individually.
+format = """
+$username\
+$hostname\
+$directory\
+$git_branch\
+$git_status\
+$python\
+$nodejs\
+$rust\
+$golang\
+$cmd_duration
+$character"""
+
+add_newline = true
+scan_timeout = 30
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol   = "[❯](bold red)"
+vimcmd_symbol  = "[❮](bold green)"
+
+[username]
+style_user = "yellow bold"
+style_root = "red bold"
+format = "[$user]($style) "
+show_always = false      # only show over ssh / as root
+
+[hostname]
+ssh_only = true
+format = "in [$hostname](bold blue) "
+
+[directory]
+truncation_length = 3
+truncate_to_repo = false
+format = "in [$path]($style) "
+style = "cyan bold"
+read_only = " 󰌾"
+
+[git_branch]
+symbol = " "
+format = "on [$symbol$branch]($style) "
+style = "purple bold"
+
+[git_status]
+format = "[$all_status$ahead_behind]($style) "
+style = "red bold"
+conflicted = "="
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+untracked = "?"
+stashed = "$"
+modified = "!"
+staged = "+"
+renamed = "»"
+deleted = "✘"
+
+[python]
+symbol = " "
+format = 'via [${symbol}${pyversion}${virtualenv:+ \($virtualenv\)}]($style) '
+style = "yellow bold"
+
+[nodejs]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+style = "green bold"
+
+[rust]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+style = "red bold"
+
+[golang]
+symbol = " "
+format = "via [$symbol($version )]($style)"
+style = "cyan bold"
+
+[cmd_duration]
+min_time = 500
+format = "took [$duration](yellow) "
