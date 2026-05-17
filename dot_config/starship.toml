@@ -55,7 +55,7 @@ ahead = "⇡${count}"
 behind = "⇣${count}"
 diverged = "⇕⇡${ahead_count}⇣${behind_count}"
 untracked = "?"
-stashed = "$"
+stashed = "\\$"
 modified = "!"
 staged = "+"
 renamed = "»"
@@ -63,7 +63,7 @@ deleted = "✘"
 
 [python]
 symbol = " "
-format = 'via [${symbol}${pyversion}${virtualenv:+ \($virtualenv\)}]($style) '
+format = 'via [${symbol}${pyversion}( \($virtualenv\))]($style) '
 style = "yellow bold"
 
 [nodejs]
