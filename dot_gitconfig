@@ -1,0 +1,6 @@
+[user]
+	email = jahandad@gmail.com
+	name = Jehandad Khan
+[credential "https://github.com"]
+	helper = 
+	helper = !/usr/bin/gh auth git-credential
