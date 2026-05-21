@@ -36,6 +36,16 @@ compinit
 # End of Docker CLI completions
 [ -f "$HOME/.fzf.zsh" ] && source "$HOME/.fzf.zsh"
 
+# CLI shell completions. terraform uses Cobra's bash-style
+# `complete -C` self-completion, which zsh needs bashcompinit to
+# emulate. gh and chezmoi ship native zsh completions via their
+# `completion zsh` subcommand, so they don't need bashcompinit.
+# compinit already ran above (Docker block).
+autoload -Uz bashcompinit && bashcompinit
+command -v terraform >/dev/null 2>&1 && complete -C "$(command -v terraform)" terraform
+command -v gh        >/dev/null 2>&1 && source <(gh completion -s zsh)
+command -v chezmoi   >/dev/null 2>&1 && source <(chezmoi completion zsh)
+
 # starship prompt — falls back silently to zsh's default prompt if not installed.
 if command -v starship >/dev/null 2>&1; then
     eval "$(starship init zsh)"

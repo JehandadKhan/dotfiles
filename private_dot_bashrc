@@ -127,6 +127,18 @@ export PATH="$HOME/.local/bin:$PATH"
 
 [ -f "$HOME/.fzf.bash" ] && source "$HOME/.fzf.bash"
 
+# CLI shell completions (terraform / gh / chezmoi). Each tool ships its
+# own completion: terraform uses Cobra's `complete -C` self-completion
+# mechanism (the binary acts as its own completion script when invoked
+# with COMP_LINE set); gh and chezmoi print a bash completion script via
+# their `completion bash` subcommand. The `terraform -install-autocomplete`
+# / `gh completion --install` flows would do the same but write directly
+# into ~/.bashrc, which fights chezmoi — so we wire them up explicitly
+# here, gated on presence so an unused shell on a fresh box doesn't error.
+command -v terraform >/dev/null 2>&1 && complete -C "$(command -v terraform)" terraform
+command -v gh        >/dev/null 2>&1 && eval "$(gh completion -s bash)"
+command -v chezmoi   >/dev/null 2>&1 && eval "$(chezmoi completion bash)"
+
 # starship prompt — overrides the PS1 block above when installed.
 # Falls back silently to the stock PS1 if starship isn't on PATH.
 if command -v starship >/dev/null 2>&1; then
