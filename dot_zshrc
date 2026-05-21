@@ -25,6 +25,10 @@ unset __conda_setup
 # <<< conda initialize <<<
 
 export PATH="$HOME/.local/bin:$PATH"
+
+# carbonyl uses an ephemeral profile by default — pin --user-data-dir so
+# cookies, logins, and history survive restarts.
+alias carbonyl='carbonyl --user-data-dir="$HOME/.local/share/carbonyl-profile"'
 # The following lines have been added by Docker Desktop to enable Docker CLI completions.
 fpath=(/Users/jehandad/.docker/completions $fpath)
 autoload -Uz compinit

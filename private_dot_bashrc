@@ -118,6 +118,10 @@ fi
 
 alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e HOME="$HOME" --network=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/data --shm-size=64G'
 
+# carbonyl uses an ephemeral profile by default — pin --user-data-dir so
+# cookies, logins, and history survive restarts.
+alias carbonyl='carbonyl --user-data-dir="$HOME/.local/share/carbonyl-profile"'
+
 # Add ~/.local/bin to PATH (for Claude Code)
 export PATH="$HOME/.local/bin:$PATH"
 
