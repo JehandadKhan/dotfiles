@@ -121,9 +121,28 @@ fi
 # work). This also makes Bazel pick the same output base
 # (~/.cache/bazel/_bazel_$USER) as the host and reuse the warm repo cache
 # instead of re-downloading toolchains (e.g. LLVM). -e USER="$USER" is kept as
-# a belt-and-suspenders fallback; --group-add video resolves to GID 44 against
-# the mounted host /etc/group, matching /dev/dri ownership for GPU access.
-alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e HOME="$HOME" -e USER="$USER" -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro --network=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/data --shm-size=64G'
+# a belt-and-suspenders fallback.
+#
+# GPU access (ROCm): the device nodes are group-owned on the host as
+#   /dev/kfd          -> render   <- rocminfo opens this
+#   /dev/dri/renderD* -> render
+#   /dev/dri/card*    -> video
+# so we --group-add the OWNING GIDs, derived at runtime via `stat -c %g` rather
+# than hardcoded. `video` is a static GID (44) but `render` is dynamically
+# allocated (109 here, but per-host), so name-based `--group-add video` misses
+# render and breaks rocminfo, and hardcoded numerics aren't portable.
+#
+# This file is a chezmoi template: the GPU flags are emitted only when /dev/kfd
+# exists at `chezmoi apply` time, so a CPU-only box gets a plain drun with no
+# --device/--group-add and never runs `stat` on a missing node. On a GPU box the
+# runtime `$(stat ...)` still resolves the render GID fresh each invocation, so
+# it self-corrects even if the GID changes without a re-apply.
+{{- if stat "/dev/kfd" }}
+alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e HOME="$HOME" -e USER="$USER" -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro --network=host --device=/dev/kfd --device=/dev/dri --group-add "$(stat -c %g /dev/kfd)" --group-add "$(stat -c %g /dev/dri/renderD128)" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/data --shm-size=64G'
+{{- else }}
+# No /dev/kfd on this host (CPU-only): drun without GPU device/group flags.
+alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e HOME="$HOME" -e USER="$USER" -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro --network=host --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/data --shm-size=64G'
+{{- end }}
 
 # carbonyl uses an ephemeral profile by default — pin --user-data-dir so
 # cookies, logins, and history survive restarts.
