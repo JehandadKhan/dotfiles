@@ -4,6 +4,7 @@
   },
   "alwaysThinkingEnabled": false,
   "includeCoAuthoredBy": false,
+  "feedbackSurveyRate": 0,
   "effortLevel": "xhigh",
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true
