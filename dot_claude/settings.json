@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "defaultMode": "auto"
+  },
+  "alwaysThinkingEnabled": false,
+  "includeCoAuthoredBy": false,
+  "effortLevel": "xhigh",
+  "agentPushNotifEnabled": true,
+  "skipAutoPermissionPrompt": true
+}
