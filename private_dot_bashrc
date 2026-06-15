@@ -116,7 +116,14 @@ if ! shopt -oq posix; then
   fi
 fi
 
-alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e HOME="$HOME" --network=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/data --shm-size=64G'
+# Mount /etc/passwd + /etc/group read-only so the host UID/GID (1000) resolves
+# to the real username/groups inside the container (whoami, getpwuid, NSS all
+# work). This also makes Bazel pick the same output base
+# (~/.cache/bazel/_bazel_$USER) as the host and reuse the warm repo cache
+# instead of re-downloading toolchains (e.g. LLVM). -e USER="$USER" is kept as
+# a belt-and-suspenders fallback; --group-add video resolves to GID 44 against
+# the mounted host /etc/group, matching /dev/dri ownership for GPU access.
+alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e HOME="$HOME" -e USER="$USER" -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro --network=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/data --shm-size=64G'
 
 # carbonyl uses an ephemeral profile by default — pin --user-data-dir so
 # cookies, logins, and history survive restarts.
@@ -138,6 +145,8 @@ export PATH="$HOME/.local/bin:$PATH"
 command -v terraform >/dev/null 2>&1 && complete -C "$(command -v terraform)" terraform
 command -v gh        >/dev/null 2>&1 && eval "$(gh completion -s bash)"
 command -v chezmoi   >/dev/null 2>&1 && eval "$(chezmoi completion bash)"
+command -v doctl     >/dev/null 2>&1 && eval "$(doctl completion bash)"
+command -v kubectl   >/dev/null 2>&1 && eval "$(kubectl completion bash)"
 
 # starship prompt — overrides the PS1 block above when installed.
 # Falls back silently to the stock PS1 if starship isn't on PATH.
