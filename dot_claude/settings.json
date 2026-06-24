@@ -1,11 +1,14 @@
 {
+  "includeCoAuthoredBy": false,
   "permissions": {
     "defaultMode": "auto"
   },
-  "alwaysThinkingEnabled": false,
-  "includeCoAuthoredBy": false,
   "feedbackSurveyRate": 0,
+  "alwaysThinkingEnabled": false,
   "effortLevel": "xhigh",
   "agentPushNotifEnabled": true,
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": true
+  }
 }

@@ -1,0 +1,4 @@
+# lazy.nvim's plugin lockfile churns on every plugin update — managing it in
+# chezmoi produces constant noise diffs and risks reverting plugin commits or
+# re-adding plugins lazy has cleaned. Let lazy.nvim own it on each machine.
+.config/nvim/lazy-lock.json

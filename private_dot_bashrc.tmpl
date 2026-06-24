@@ -137,11 +137,22 @@ fi
 # --device/--group-add and never runs `stat` on a missing node. On a GPU box the
 # runtime `$(stat ...)` still resolves the render GID fresh each invocation, so
 # it self-corrects even if the GID changes without a re-apply.
+#
+# Python isolation: because we bind-mount $HOME onto the container's $HOME, the
+# host's `pip install --user` tree (~/.local/lib/pythonX.Y/site-packages, plus
+# ~/.local/bin which is on PATH) leaks into every container interpreter via
+# Python's automatic user-site. That shadows/contaminates venvs built inside
+# the container. We neutralize it without un-mounting $HOME:
+#   PYTHONNOUSERSITE=1      -> Python ignores ~/.local/lib user-site entirely
+#   PIP_USER=0              -> `pip install` never prefers/writes ~/.local
+#   PIP_REQUIRE_VIRTUALENV=1 -> pip refuses to install outside an active venv
+# Build container venvs as usual (`python -m venv .venv && . .venv/bin/activate`)
+# and they stay insulated from the host ~/.local.
 {{- if stat "/dev/kfd" }}
-alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e HOME="$HOME" -e USER="$USER" -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro --network=host --device=/dev/kfd --device=/dev/dri --group-add "$(stat -c %g /dev/kfd)" --group-add "$(stat -c %g /dev/dri/renderD128)" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/data --shm-size=64G'
+alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e HOME="$HOME" -e USER="$USER" -e PYTHONNOUSERSITE=1 -e PIP_USER=0 -e PIP_REQUIRE_VIRTUALENV=1 -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro --network=host --device=/dev/kfd --device=/dev/dri --group-add "$(stat -c %g /dev/kfd)" --group-add "$(stat -c %g /dev/dri/renderD128)" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/data --shm-size=64G'
 {{- else }}
 # No /dev/kfd on this host (CPU-only): drun without GPU device/group flags.
-alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e HOME="$HOME" -e USER="$USER" -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro --network=host --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/data --shm-size=64G'
+alias drun='docker run -it -u "$(id -u):$(id -g)" -v "$HOME:$HOME" -w "$HOME" -e HOME="$HOME" -e USER="$USER" -e PYTHONNOUSERSITE=1 -e PIP_USER=0 -e PIP_REQUIRE_VIRTUALENV=1 -v /etc/passwd:/etc/passwd:ro -v /etc/group:/etc/group:ro --network=host --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -v $HOME:/data --shm-size=64G'
 {{- end }}
 
 # carbonyl uses an ephemeral profile by default — pin --user-data-dir so
