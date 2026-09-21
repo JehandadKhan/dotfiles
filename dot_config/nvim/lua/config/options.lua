@@ -33,3 +33,10 @@ if vim.fn.has("mac") == 1 then
   vim.env.MAGICK_CONFIGURE_PATH = vim.fn.expand("$HOME/.config/ImageMagick-7")
     .. ":" .. brew_prefix .. "/etc/ImageMagick-7"
 end
+
+-- Default indentation: 2 spaces. (vim-sleuth still overrides per-file when
+-- it detects an existing file's style; this is the fallback for new files.)
+vim.opt.expandtab = true
+vim.opt.shiftwidth = 2
+vim.opt.tabstop = 2
+vim.opt.softtabstop = 2
