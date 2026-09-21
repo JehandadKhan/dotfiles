@@ -23,6 +23,65 @@ return {
       force_ft = nil,
     },
     init = function()
+      -- Make the LSP attach to .ipynb buffers.
+      --
+      -- LazyVim lazy-loads nvim-lspconfig on BufReadPre (lsp/init.lua), but
+      -- jupytext registers a BufReadCmd for *.ipynb -- and a *Cmd autocmd takes
+      -- over the read, so BufReadPre never fires for a notebook. Result:
+      -- nvim-lspconfig is never loaded, no client ever attaches, and nvim-cmp
+      -- silently falls back to buffer-word completion. (Same BufReadCmd trap as
+      -- the seeding note below; it bites LSP loading too.)
+      --
+      -- Both halves are load-bearing: force-loading lspconfig is not enough on
+      -- its own, because its FileType hook already missed this buffer, and
+      -- re-firing FileType alone does nothing while lspconfig is unloaded.
+      -- Verified: 0 clients before, 1 (correct root_dir) after.
+      local function attach_lsp(buf)
+        if not vim.api.nvim_buf_is_valid(buf) then
+          return
+        end
+        require("lazy").load({ plugins = { "nvim-lspconfig" } })
+        -- schedule: jupytext's BufReadCmd may still be converting the buffer,
+        -- and the filetype is not python until it finishes.
+        vim.schedule(function()
+          if vim.api.nvim_buf_is_valid(buf) then
+            vim.api.nvim_exec_autocmds("FileType", { buffer = buf })
+          end
+        end)
+      end
+
+      local lsp_group = vim.api.nvim_create_augroup("JupytextLspAttach", { clear = true })
+
+      -- `:edit foo.ipynb` during a session.
+      vim.api.nvim_create_autocmd({ "BufReadPost", "BufAdd" }, {
+        group = lsp_group,
+        pattern = "*.ipynb",
+        callback = function(ev)
+          attach_lsp(ev.buf)
+        end,
+      })
+
+      -- `nvim foo.ipynb` from the shell. A file named on the command line is
+      -- read before any lazy-loaded plugin can register an autocmd, so the
+      -- BufReadPost/BufAdd hook above never sees it -- by VimEnter the read is
+      -- already done and lspconfig was never triggered (BufReadPre having been
+      -- swallowed by jupytext's BufReadCmd). Same argv() sweep the seeding
+      -- below uses for the same reason.
+      vim.api.nvim_create_autocmd("VimEnter", {
+        group = lsp_group,
+        once = true,
+        callback = function()
+          for _, name in ipairs(vim.fn.argv()) do
+            if type(name) == "string" and name:match("%.ipynb$") then
+              local buf = vim.fn.bufnr(name)
+              if buf ~= -1 then
+                attach_lsp(buf)
+              end
+            end
+          end
+        end,
+      })
+
       -- Seeding must be registered before lazy.nvim loads plugins, so that a
       -- file named on the command line (`nvim new.ipynb`) is created before
       -- jupytext's BufReadCmd tries to read it. Registering this in config()
