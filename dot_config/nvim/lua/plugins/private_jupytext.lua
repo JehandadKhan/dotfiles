@@ -5,9 +5,10 @@
 local SEED_LINES = {
   "# %% [markdown]",
   "# **Cells:** `# %%` code \194\183 `# %% [markdown]` text",
-  "# **Run:** `<leader>ml` line \194\183 `<leader>mr` cell \194\183 `<leader>mv` selection",
+  "# **Run:** `<leader>mc` cell \194\183 `<leader>mn` cell+next \194\183 `<leader>ml` line",
+  "# **Rerun:** `<leader>mr` cell \194\183 `<leader>mR` all \194\183 `<leader>mv` selection",
   "# **Kernel:** `<leader>mi` init \194\183 `:MoltenInfo` status",
-  "# **Output:** `<leader>mo` enter \194\183 `<leader>mh` hide \194\183 `:MoltenExportOutput` save",
+  "# **Output:** `<leader>mo` enter \194\183 `<leader>mh` hide \194\183 `<leader>mt` toggle inline",
   "",
   "# %%",
   "",
