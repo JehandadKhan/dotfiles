@@ -9,6 +9,7 @@ local SEED_LINES = {
   "# **Rerun:** `<leader>mr` cell \194\183 `<leader>mR` all \194\183 `<leader>mv` selection",
   "# **Kernel:** `<leader>mi` init \194\183 `:MoltenInfo` status",
   "# **Output:** `<leader>mo` enter \194\183 `<leader>mh` hide \194\183 `<leader>mt` toggle inline",
+  "# **Debug:** `<leader>db` breakpoint \194\183 `<leader>mD` debug cell \194\183 `<leader>dO` step \194\183 `<leader>dc` continue \194\183 `<leader>dt` stop",
   "",
   "# %%",
   "",

@@ -108,3 +108,28 @@ documentation and is not deployed to `~/CLAUDE.md`.
   `drun` Python-isolation env vars, `lang.python` extra, `init.defaultBranch`).
   `chezmoi status` clean afterwards. Lesson: run `chezmoi status`/`diff`
   before every apply; `MM` means local edits that apply would clobber.
+
+### 2026-09-23 — debugger for notebook cells (`<leader>mD`)
+
+- **Goal.** Line-by-line debugging in molten notebooks with minimal manual
+  steps (no `debugpy.listen` in cells, breakpoints in the notebook buffer).
+- **Design.** nvim-dap → `dot_config/nvim/scripts/nb_dap_bridge.py` (new, a
+  stdio DAP adapter) → the kernel's built-in debugger over `debug_request` on
+  the control channel — the path JupyterLab uses, on the kernel molten started.
+  The bridge maps notebook lines ↔ ipykernel's per-cell temp files. Full
+  mechanism and traps are in the jems repo `CLAUDE.md` ("Debugging cells").
+- **Files.** `lazyvim.json` (+`dap.core` extra), `private_molten.lua`
+  (`debug_cell`, kernel discovery, molten iopub patch), `private_jupytext.lua`
+  (new-notebook cheatsheet gains a Debug line).
+- **molten patch.** Upstream molten ignores `parent_header`, so debugger
+  traffic marked paused cells Done and dropped their output. Patched at
+  startup (own-execute msg_id filter), reverted on Lazy update/sync/restore.
+  Candidate for an upstream PR.
+- **Verified in the UI** (nvim in tmux, keystrokes + screen captures):
+  breakpoint in a cell-1 function hit from cell 2 with the cursor in the
+  notebook buffer; locals; step; continue; molten output shown; normal run
+  after terminate; re-attach; terminate while paused; edited cell with a
+  breakpoint in itself. Two bugs were found this way and fixed (Done-early
+  output loss; `<leader>dt` killing the kernel).
+- **Not verified:** the multi-kernel `vim.ui.select` picker; Linux (`ps -A -o`
+  is POSIX, expected fine).
