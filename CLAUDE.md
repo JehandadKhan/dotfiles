@@ -44,3 +44,29 @@ documentation and is not deployed to `~/CLAUDE.md`.
   git remote set-url origin https://github.com/JehandadKhan/dotfiles.git
   ```
   (was `.../jehandadkhan/dotfiles.git`). Verified with a fetch; `main` in sync.
+
+### 2026-09-22 — default branch for new repos, remote URL capitalization
+
+- **`init.defaultBranch`.** Was unset globally and absent from `dot_gitconfig`,
+  so `git init` fell back to `master` with a hint. Added to `dot_gitconfig`:
+  ```
+  [init]
+      defaultBranch = main
+  ```
+  Applied with `chezmoi apply ~/.gitconfig`; verified
+  `git config --global --get init.defaultBranch` → `main`. Affects new repos
+  only; existing repos keep their current branch names.
+- **Committed and pushed** `40b408f` *git: default new repos to main branch*
+  (`b3d295f..40b408f`), with explicit approval.
+- **Remote URL corrected** to `git@github.com:JehandadKhan/dotfiles.git`.
+- **Correction to the 2026-09-20 entry above.** That entry states the remote was
+  set to `https://github.com/JehandadKhan/dotfiles.git`. This clone's remote was
+  in fact still the original clone URL, `git@github.com:jehandadkhan/dotfiles.git`
+  — SSH, not HTTPS, and lowercase. The reflog shows that string as the `clone:`
+  source from 2026-05-07, unchanged since. So the `set-url` described on 09-20
+  either ran in a different clone or was logged without being run; git keeps no
+  record of `set-url`, so the two cannot be told apart after the fact. Nothing
+  reverted it. Pushes worked throughout via GitHub's rename redirect, so the
+  capitalization was cosmetic.
+- **Note:** pushes here use SSH, so the `gh auth git-credential` helper in
+  `dot_gitconfig` (HTTPS-only) is not exercised by them.
