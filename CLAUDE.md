@@ -133,3 +133,19 @@ documentation and is not deployed to `~/CLAUDE.md`.
   output loss; `<leader>dt` killing the kernel).
 - **Not verified:** the multi-kernel `vim.ui.select` picker; Linux (`ps -A -o`
   is POSIX, expected fine).
+
+### 2026-09-23 (later) — debugger UI for large values, patch documentation
+
+- **Symptom.** Variables pane couldn't show large lists: Scopes was a fixed
+  40 columns with unwrapped values (cut at the border), and virtual text
+  dumped whole reprs into code lines. Reproduced in tmux with a 5000-item list.
+- **Fix.** New `dot_config/nvim/lua/plugins/private_dap.lua`: dap-ui
+  `wrap = true` (dap-ui's own option — it sets `'wrap'` per window after
+  showing the buffer, so an autocmd was tried and lost), sidebar 33% of width
+  with Scopes at 55%, inline values capped at 60 chars. Verified in the UI:
+  values wrap in full, expanding shows 100 children + `more` (debugpy paging).
+- **Also.** The user's `<leader>db` "didn't work" because their notebook nvim
+  predated the config change; restart fixes it.
+- **Docs.** jems `CLAUDE.md` now has "⚠ Local patch to molten-nvim — read
+  before updating molten" (diff, lifecycle, update procedure); jems
+  `CHEATSHEET.md` has a "Debugging cells" section.
