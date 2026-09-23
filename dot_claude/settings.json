@@ -6,6 +6,7 @@
   "feedbackSurveyRate": 0,
   "alwaysThinkingEnabled": false,
   "effortLevel": "xhigh",
+  "tui": "fullscreen",
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
   "enabledPlugins": {

@@ -94,3 +94,17 @@ documentation and is not deployed to `~/CLAUDE.md`.
   capitalization was cosmetic.
 - **Note:** pushes here use SSH, so the `gh auth git-credential` helper in
   `dot_gitconfig` (HTTPS-only) is not exercised by them.
+
+### 2026-09-23 — merge upstream, capture drifted targets, apply
+
+- **Merged** `origin/main` (`40b408f`, `2226ea1`) into 4 local nvim commits;
+  `CLAUDE.md` conflicted only because both sides appended a log entry — kept
+  both in date order. Pushed as `2284164`.
+- **Drift found before apply.** `chezmoi status` showed `MM` on two targets
+  edited in place, never in source. A plain apply would have deleted them:
+  - `~/.zshrc` — pyenv init (`PYENV_ROOT`, PATH prepend, `pyenv init -`).
+  - `~/.claude/settings.json` — `"tui": "fullscreen"`.
+  Captured both with `chezmoi re-add`, then `chezmoi apply` (brought over the
+  `drun` Python-isolation env vars, `lang.python` extra, `init.defaultBranch`).
+  `chezmoi status` clean afterwards. Lesson: run `chezmoi status`/`diff`
+  before every apply; `MM` means local edits that apply would clobber.
