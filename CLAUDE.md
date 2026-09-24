@@ -149,3 +149,17 @@ documentation and is not deployed to `~/CLAUDE.md`.
 - **Docs.** jems `CLAUDE.md` now has "⚠ Local patch to molten-nvim — read
   before updating molten" (diff, lifecycle, update procedure); jems
   `CHEATSHEET.md` has a "Debugging cells" section.
+
+### 2026-09-23 (later) — apply basedpyright's inferred types
+
+- **Ask.** "basedpyright suggests types; can I have it auto-typed?"
+- **Done.** `private_lspconfig.lua`: basedpyright `keys` `<leader>ct` (line /
+  visual selection) and `<leader>cT` (buffer) apply the type inlay hints'
+  textEdits, filtered (no bare `Any`, no param-name hints) with imports
+  deduped and placed after the first import block (notebook: first code cell).
+  On demand rather than on save, deliberately.
+- **Verified in the UI** (tmux + RPC buffer dumps): line-only, visual range,
+  buffer after a partial run (no duplicate imports), idempotent re-run, and an
+  `.ipynb` with no imports (import lands under `# %%`, file saves and
+  round-trips with header/kernelspec intact). Two bugs found and fixed on the
+  way (fuzzy range end; `\n`-prefixed import edits applied raw).
