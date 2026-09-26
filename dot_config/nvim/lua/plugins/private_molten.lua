@@ -197,34 +197,78 @@ end
 -- jupyter-server client returns no msg_id, so it keeps the old unfiltered path.
 -- Upstream-worthy; until then it is applied here.
 --
+-- Second patch, unrelated to the first: molten leaks cell-highlight extmarks.
+-- update_interface() calls _show_selected() on every cursor move, which adds one
+-- highlight per line of the current cell to `molten-highlights`, but only clears
+-- the old ones when the cursor moves to a *different* cell (moltenbuffer.py). So
+-- they pile up while you stay in one cell -- ~1M on a 108-line notebook after a
+-- day and a half, at which point every redraw spins at 100% CPU. The patch clears
+-- the namespace first; it only ever holds the selected cell's highlight.
+--
 -- lazy.nvim updates with a plain `git checkout` (no --force), so a dirty file
--- would block a molten update: the patch is reverted on Lazy{Update,Sync,Restore}Pre
--- and re-applied on the next startup (init runs before molten's python host loads).
-local MOLTEN_PATCH_MARK = "# [nvim-config] own-execute filter"
-local MOLTEN_PATCH_FILE = "rplugin/python3/molten/runtime.py"
+-- would block a molten update: the patches are reverted on
+-- Lazy{Update,Sync,Restore}Pre and re-applied on the next startup (init runs
+-- before molten's python host loads).
+local MOLTEN_EXEC_MARK = "# [nvim-config] own-execute filter"
+local MOLTEN_HL_MARK = "# [nvim-config] highlight leak"
+-- Each entry is one file, patched all-or-nothing: half a patch (ids recorded but
+-- never filtered, or the reverse) would be worse than none.
 local MOLTEN_PATCHES = {
   {
-    anchor = "        self.kernel_client.execute(code)\n",
-    body = [[
+    file = "rplugin/python3/molten/runtime.py",
+    mark = MOLTEN_EXEC_MARK,
+    warn = "molten iopub patch no longer applies (upstream changed runtime.py); "
+      .. "cell output may be lost while debugging",
+    hunks = {
+      {
+        anchor = "        self.kernel_client.execute(code)\n",
+        body = [[
         msg_id = self.kernel_client.execute(code)
-        ]] .. MOLTEN_PATCH_MARK .. "\n" .. [[
+        ]] .. MOLTEN_EXEC_MARK .. "\n" .. [[
         if msg_id:
             self.__dict__.setdefault("_nvim_own_ids", set()).add(msg_id)
 ]],
-  },
-  {
-    anchor = [[
+      },
+      {
+        anchor = [[
                 if "content" not in message or "msg_type" not in message:
                     continue
 ]],
-    body = [[
+        body = [[
                 if "content" not in message or "msg_type" not in message:
                     continue
-                ]] .. MOLTEN_PATCH_MARK .. "\n" .. [[
+                ]] .. MOLTEN_EXEC_MARK .. "\n" .. [[
                 own = self.__dict__.get("_nvim_own_ids")
                 if own is not None and (message.get("parent_header") or {}).get("msg_id") not in own:
                     continue
 ]],
+      },
+    },
+  },
+  {
+    file = "rplugin/python3/molten/moltenbuffer.py",
+    mark = MOLTEN_HL_MARK,
+    warn = "molten highlight-leak patch no longer applies (upstream changed moltenbuffer.py); "
+      .. "long sessions in one cell may slow redraw",
+    hunks = {
+      {
+        anchor = [[
+        if buf.number not in [b.number for b in self.buffers]:
+            return
+
+        if span.begin.lineno == span.end.lineno:
+]],
+        body = [[
+        if buf.number not in [b.number for b in self.buffers]:
+            return
+
+        ]] .. MOLTEN_HL_MARK .. "\n" .. [[
+        self.nvim.funcs.nvim_buf_clear_namespace(buf.number, self.highlight_namespace, 0, -1)
+
+        if span.begin.lineno == span.end.lineno:
+]],
+      },
+    },
   },
 }
 
@@ -233,36 +277,42 @@ local function molten_dir()
 end
 
 local function patch_molten()
-  local path = molten_dir() .. "/" .. MOLTEN_PATCH_FILE
-  local f = io.open(path, "r")
-  if not f then
-    return -- not installed yet
-  end
-  local src = f:read("*a")
-  f:close()
-  if src:find(MOLTEN_PATCH_MARK, 1, true) then
-    return
-  end
-  -- all-or-nothing: half a patch (ids recorded but never filtered, or the
-  -- reverse) would be worse than none
   for _, p in ipairs(MOLTEN_PATCHES) do
-    local s, e = src:find(p.anchor, 1, true)
-    if not s then
-      vim.schedule(function()
-        vim.notify("molten iopub patch no longer applies (upstream changed runtime.py); "
-          .. "cell output may be lost while debugging", vim.log.levels.WARN)
-      end)
-      return
+    local path = molten_dir() .. "/" .. p.file
+    local f = io.open(path, "r")
+    if not f then
+      return -- not installed yet
     end
-    src = src:sub(1, s - 1) .. p.body .. src:sub(e + 1)
+    local src = f:read("*a")
+    f:close()
+    if not src:find(p.mark, 1, true) then
+      local ok = true
+      for _, h in ipairs(p.hunks) do
+        local s, e = src:find(h.anchor, 1, true)
+        if not s then
+          ok = false
+          vim.schedule(function()
+            vim.notify(p.warn, vim.log.levels.WARN)
+          end)
+          break
+        end
+        src = src:sub(1, s - 1) .. h.body .. src:sub(e + 1)
+      end
+      if ok then
+        f = assert(io.open(path, "w"))
+        f:write(src)
+        f:close()
+      end
+    end
   end
-  f = assert(io.open(path, "w"))
-  f:write(src)
-  f:close()
 end
 
 local function unpatch_molten()
-  vim.system({ "git", "-C", molten_dir(), "checkout", "--", MOLTEN_PATCH_FILE }):wait()
+  local cmd = { "git", "-C", molten_dir(), "checkout", "--" }
+  for _, p in ipairs(MOLTEN_PATCHES) do
+    table.insert(cmd, p.file)
+  end
+  vim.system(cmd):wait()
 end
 
 -- Debugging cells ---------------------------------------------------------------
