@@ -3,13 +3,28 @@
   "permissions": {
     "defaultMode": "auto"
   },
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true
+  },
   "feedbackSurveyRate": 0,
   "alwaysThinkingEnabled": false,
   "effortLevel": "xhigh",
   "tui": "fullscreen",
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "xhigh"
+    }
+  },
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
-  "enabledPlugins": {
-    "pyright-lsp@claude-plugins-official": true
+  "feedbackDrafts": "off",
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "~/.claude/notify.sh done" }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "~/.claude/notify.sh 'needs input'" }] }
+    ]
   }
 }

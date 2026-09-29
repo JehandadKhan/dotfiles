@@ -163,3 +163,28 @@ documentation and is not deployed to `~/CLAUDE.md`.
   `.ipynb` with no imports (import lands under `# %%`, file saves and
   round-trips with header/kernelspec intact). Two bugs found and fixed on the
   way (fuzzy range end; `\n`-prefixed import edits applied raw).
+
+### 2026-09-29 — Claude Code "done" signal in tmux
+
+- **Goal.** Several Claude Code sessions in tmux panes; see which one finished
+  or needs input.
+- **`dot_claude/executable_notify.sh`** → `~/.claude/notify.sh` (0755). Rings
+  the bell on the pane's tty (`tmux display -p -t "$TMUX_PANE" '#{pane_tty}'`)
+  and shows a 4 s `display-message` with `session:window.pane (cwd basename)`.
+  No-op outside tmux. `$TMUX_PANE` is inherited by hooks from the pane's shell.
+- **`dot_claude/settings.json`**: `hooks.Stop` → `notify.sh done`,
+  `hooks.Notification` → `notify.sh 'needs input'`.
+- **`dot_tmux.conf`**: `monitor-bell on`, `bell-action any`, `visual-bell off`,
+  `window-status-bell-style` red (`#f38ba8`). The bell flag marks the
+  *window* tab, so for several Claude panes in one window the display-message
+  is what tells you which pane.
+- **Drift absorbed.** The live `~/.claude/settings.json` had diverged from
+  source because Claude Code writes it itself (`/config`, `/plugin`):
+  `frontend-design` plugin, `modelSettings.claude-opus-5-5.effortLevel`,
+  `feedbackDrafts: "off"`. Source was rebuilt as live + hooks, then
+  `chezmoi apply --force` for that file. Expect this drift to recur; run
+  `chezmoi diff ~/.claude/settings.json` before editing the source.
+- **Rebased onto upstream** before pushing; upstream `e93e488` had added
+  `"tui": "fullscreen"` next to the same lines — kept both.
+- **Not managed here:** Windows Terminal `"bellStyle": ["audible", "taskbar"]`
+  (Windows-side `settings.json`) makes the forwarded bell flash the taskbar.
