@@ -1,0 +1,1106 @@
+#!/usr/bin/env python3
+"""vault-sync: keep the Obsidian vault's project notes in step with the code behind them.
+
+A note in Projects/ becomes a code project by naming its code in frontmatter. Nothing else is
+synced: a directory under ~/repos is a project only once a note links it.
+
+  repo: ~/repos/rocm-jax              local clone in WSL (one per note)
+  remotes:                            GitHub repos where the work happens
+    - https://github.com/ROCm/rocm-jax
+  remote_filter: 'label:"AMD GPU"'    optional search qualifiers for busy upstream repos
+
+Commands (`sync` is the default):
+  vault-sync [sync] [--repo X ...] [--remotes] [--days N] [-v] [-n]
+      Rewrite the local block of every linked note (git state, worktrees, the status sections
+      of the repo's CLAUDE.md and TODO.md), or only X (note name, repo dir name or path).
+      --remotes also rewrites the GitHub block via `gh`: PRs merged, open PRs and issues with
+      activity in the last N days, and the state of the issue/PR links written in the note.
+  vault-sync --hook
+      Claude Code Stop hook: read the hook JSON on stdin and sync only the linked repo that
+      contains the session's cwd. Never calls GitHub, always exits 0.
+  vault-sync list
+      Linked notes, and the git repos under ~/repos that no note links.
+  vault-sync link [PATH] [--note NAME] [--remote OWNER/REPO ...] [--filter QUALIFIERS]
+      Link a local repo and/or GitHub repos to a note (created if missing), then sync it.
+  vault-sync unlink NOTE [--remotes]
+      Drop the note's repo link and local block; --remotes also drops remotes and GitHub block.
+  vault-sync report NOTE ... | --all [--days N] [--fetch]
+      Print a status dossier to stdout without writing to the vault: note summary, local repo
+      state, commits in the window, GitHub activity, and daily-note lines that mention the
+      project with their standup owner. Used by the /project-status skill.
+
+Everything outside the vault-sync blocks (description, Notes, Timeline, search) is yours and
+is never touched.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import urllib.parse
+from pathlib import Path
+
+# ----------------------------------------------------------------------------- config
+VAULT = Path("/mnt/c/Users/jkhan/Documents/Obsidian Vault")
+PROJECTS_DIR = VAULT / "Projects"
+DAILY_DIR = VAULT / "Daily"
+REPOS_ROOT = Path.home() / "repos"
+CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
+LOCK_FILE = Path.home() / ".cache" / "vault-sync.lock"
+
+RECENT_DAYS = 14          # default window for commit, session and GitHub activity
+MAX_SECTION_LINES = 60    # longer CLAUDE.md sections are cut to their last N lines
+NOTE_ITEMS = 5            # PRs / issues listed per kind in a note's GitHub block
+REPORT_ITEMS = 15         # ... and in a report
+REPORT_COMMITS = 60       # commits listed in a report
+REPORT_MENTIONS = 120     # daily-note lines listed in a report
+SYNC_KEYS = ("repo", "branch", "last_commit", "worktrees", "synced")
+
+# CLAUDE.md sections worth showing a manager (matched against the lowercased heading)
+CLAUDE_MD_HEADINGS = re.compile(
+    r"^(progress|status|state|current|open gaps|next|decision|blocked|todo|follow[- ]?up|"
+    r"key facts|milestone|open (questions|items|work))"
+)
+# TODO.md sections to show
+TODO_MD_HEADINGS = re.compile(r"^(now|decisions?( needed)?|blocked|next|in progress)")
+
+START = "<!-- vault-sync:start -->"
+END = "<!-- vault-sync:end -->"
+GH_START = "<!-- vault-sync:github:start -->"
+GH_END = "<!-- vault-sync:github:end -->"
+
+
+class UserError(Exception):
+    pass
+
+
+# ----------------------------------------------------------------------------- helpers
+def log(msg: str) -> None:
+    if VERBOSE:
+        print(msg)
+
+
+def git(repo: Path, *args: str, timeout: int = 20) -> str:
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        )
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except (subprocess.SubprocessError, OSError):
+        return ""
+
+
+def home_path(p: Path) -> str:
+    return "~/" + str(p.relative_to(Path.home())) if p.is_relative_to(Path.home()) else str(p)
+
+
+def same_path(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
+
+
+def main_repo_root(path: Path) -> Path | None:
+    """The main working tree of the repo containing `path`, also when `path` is in a worktree."""
+    common = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not common:
+        return None
+    c = Path(common)
+    if c.name == ".git":
+        return c.parent
+    top = git(path, "rev-parse", "--show-toplevel")
+    return Path(top) if top else None
+
+
+def gh_slug(s: str) -> str | None:
+    """OWNER/REPO from `OWNER/REPO`, an https URL or an ssh remote; None if it isn't GitHub."""
+    m = re.match(r"^(?:https?://github\.com/|git@github\.com:)?([\w.-]+)/([\w.-]+?)(?:\.git)?/?$",
+                 (s or "").strip())
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
+def encode_project_dir(path: Path) -> str:
+    """Claude Code's ~/.claude/projects directory name for a working directory."""
+    return re.sub(r"[/._]", "-", str(path))
+
+
+def session_dirs(repo: Path) -> list[Path]:
+    enc = encode_project_dir(repo)
+    if not CLAUDE_PROJECTS.is_dir():
+        return []
+    return [d for d in CLAUDE_PROJECTS.iterdir()
+            if d.is_dir() and (d.name == enc or d.name.startswith(enc + "--claude-worktrees-"))]
+
+
+def session_activity(repo: Path, days: int) -> tuple[dt.datetime | None, int]:
+    """(latest session-file mtime, number of session files touched in the last `days`)."""
+    latest, recent = None, 0
+    cutoff = dt.datetime.now() - dt.timedelta(days=days)
+    for d in session_dirs(repo):
+        for f in d.glob("*.jsonl"):
+            try:
+                m = dt.datetime.fromtimestamp(f.stat().st_mtime)
+            except OSError:
+                continue
+            if latest is None or m > latest:
+                latest = m
+            if m >= cutoff:
+                recent += 1
+    return latest, recent
+
+
+def md_cell(s: str) -> str:
+    return s.replace("|", "\\|").strip()
+
+
+def md_text(s: str) -> str:
+    """GitHub titles as inline text: no accidental links, tags or HTML in Obsidian."""
+    s = s.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("<", "\\<")
+    return re.sub(r"#(?=\w)", r"\\#", s).strip()
+
+
+def demote_checkboxes(text: str) -> str:
+    """`- [ ]` lines would become vault tasks (Home, Pending TODOs); show them as plain bullets."""
+    marks = {" ": "○", "~": "◐", "x": "●", "X": "●", "-": "✕"}
+    return re.sub(
+        r"^(\s*[-*+])\s+\[([ ~xX-])\]\s+",
+        lambda m: f"{m.group(1)} {marks[m.group(2)]} ",
+        text, flags=re.M,
+    )
+
+
+def neutralise_links(text: str) -> str:
+    """Relative markdown links point at repo files, not vault notes; keep the path as text."""
+    return re.sub(r"\[([^\]]+)\]\((?![a-zA-Z][a-zA-Z0-9+.-]*:)([^)\s]+)\)", r"\1 (`\2`)", text)
+
+
+def clean(text: str) -> str:
+    return neutralise_links(demote_checkboxes(text)).rstrip()
+
+
+def split_sections(text: str) -> list[tuple[int, str, str]]:
+    """[(level, heading, body)] for every `##`/`###` heading; body excludes the heading."""
+    out: list[tuple[int, str, list[str]]] = []
+    in_code = False
+    for line in text.splitlines():
+        if line.startswith("```"):
+            in_code = not in_code
+        m = None if in_code else re.match(r"^(#{2,3})\s+(.*)$", line)
+        if m:
+            out.append((len(m.group(1)), m.group(2).strip(), []))
+        elif out:
+            out[-1][2].append(line)
+    return [(lvl, h, "\n".join(b).strip("\n")) for lvl, h, b in out]
+
+
+def pick_sections(text: str, pattern: re.Pattern, source: str) -> list[str]:
+    """Render the matching level-2 sections of a doc, each as `### <heading> (<source>)`."""
+    chunks = []
+    sections = split_sections(text)
+    i = 0
+    while i < len(sections):
+        lvl, heading, body = sections[i]
+        i += 1
+        if lvl != 2:
+            continue
+        # a level-2 section owns the level-3 sections that follow it
+        parts = [body]
+        while i < len(sections) and sections[i][0] == 3:
+            parts.append(f"#### {sections[i][1]}\n{sections[i][2]}")
+            i += 1
+        if not pattern.match(heading.lower()):
+            continue
+        body = "\n\n".join(p for p in parts if p).strip("\n")
+        lines = body.splitlines()
+        if len(lines) > MAX_SECTION_LINES:
+            lines = [f"*… earlier lines omitted, see `{source}`*"] + lines[-MAX_SECTION_LINES:]
+        chunks.append(f"### {heading} ({source})\n" + clean("\n".join(lines)))
+    return chunks
+
+
+def first_paragraph(text: str) -> str:
+    para: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("```"):
+            if para:
+                break
+            continue
+        if s.startswith(("- ", "* ", "|", "<", "!")) and not para:
+            continue
+        para.append(s)
+    return " ".join(para)
+
+
+# ----------------------------------------------------------------------------- frontmatter
+def split_frontmatter(text: str) -> tuple[list[str] | None, str]:
+    """(frontmatter lines without the `---` fences, body); None when the note has none."""
+    lines = text.split("\n")
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                return lines[1:i], "\n".join(lines[i + 1:])
+    return None, text
+
+
+def join_note(fm: list[str], body: str) -> str:
+    return "\n".join(["---", *fm, "---"]) + "\n" + body
+
+
+def fm_entries(fm: list[str]) -> list[list]:
+    """Frontmatter lines grouped by top-level key; list items stay with their key."""
+    entries: list[list] = []
+    for line in fm:
+        m = re.match(r"^([A-Za-z_][\w-]*)\s*:", line)
+        if m:
+            entries.append([m.group(1), [line]])
+        elif entries:
+            entries[-1][1].append(line)
+        else:
+            entries.append([None, [line]])
+    return entries
+
+
+def unquote(s: str) -> str:
+    if len(s) >= 2 and s[0] == s[-1] == "'":
+        return s[1:-1].replace("''", "'")
+    if len(s) >= 2 and s[0] == s[-1] == '"':
+        return s[1:-1]
+    return s
+
+
+def yaml_quote(s: str) -> str:
+    return "'" + s.replace("'", "''") + "'"
+
+
+def fm_get(fm: list[str], key: str) -> str | list[str] | None:
+    for k, lines in fm_entries(fm):
+        if k != key:
+            continue
+        val = lines[0].split(":", 1)[1].strip()
+        items = [re.sub(r"^\s*-\s*", "", ln).strip() for ln in lines[1:] if re.match(r"^\s*-\s", ln)]
+        if items:
+            return [unquote(i) for i in items]
+        if val.startswith("[") and val.endswith("]"):
+            return [unquote(x.strip()) for x in val[1:-1].split(",") if x.strip()]
+        return unquote(val) if val else None
+    return None
+
+
+def fm_set(fm: list[str], key: str, value: str | list[str] | None) -> list[str]:
+    """Set a scalar or list key in place (appended if new); None removes it."""
+    if value is None:
+        new = None
+    elif isinstance(value, list):
+        new = [f"{key}:"] + [f"  - {v}" for v in value]
+    else:
+        new = [f"{key}: {value}"]
+    out, done = [], False
+    for k, lines in fm_entries(fm):
+        if k == key:
+            if new is not None and not done:
+                out += new
+                done = True
+            continue
+        out += lines
+    if new is not None and not done:
+        out += new
+    return out
+
+
+def set_fm(text: str, values: dict) -> str:
+    fm, body = split_frontmatter(text)
+    if fm is None:
+        fm = ["type: project", "tags:", "  - project"]
+    for k, v in values.items():
+        fm = fm_set(fm, k, v)
+    return join_note(fm, body)
+
+
+# ----------------------------------------------------------------------------- projects
+class Project:
+    def __init__(self, path: Path, fm: list[str]):
+        self.path = path
+        self.name = path.stem
+        repo = fm_get(fm, "repo")
+        self.repo = Path(os.path.expanduser(repo)) if isinstance(repo, str) and repo else None
+        remotes = fm_get(fm, "remotes") or []
+        remotes = [remotes] if isinstance(remotes, str) else remotes
+        self.remotes = [s for s in (gh_slug(r) for r in remotes) if s]
+        f = fm_get(fm, "remote_filter")
+        self.filter = f if isinstance(f, str) else ""
+
+    @property
+    def repo_ok(self) -> bool:
+        return self.repo is not None and (self.repo / ".git").exists()
+
+
+def read_note(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def projects() -> list[Project]:
+    """Every note in Projects/ that links a repo or GitHub remotes."""
+    out = []
+    for p in sorted(PROJECTS_DIR.glob("*.md")):
+        try:
+            fm, _ = split_frontmatter(read_note(p))
+        except OSError:
+            continue
+        if fm is None:
+            continue
+        proj = Project(p, fm)
+        if proj.repo or proj.remotes:
+            out.append(proj)
+    return out
+
+
+def resolve(arg: str, projs: list[Project]) -> Project:
+    """Find a linked project by note name, repo dir name, path, or a unique part of its name."""
+    low = arg.strip().lower().removesuffix(".md")
+    path = Path(os.path.expanduser(arg))
+    root = main_repo_root(path) if path.exists() else None
+    tests = [
+        lambda p: p.name.lower() == low,
+        lambda p: p.repo is not None and p.repo.name.lower() == low,
+        lambda p: p.repo is not None and root is not None and same_path(p.repo, root),
+        lambda p: low in p.name.lower(),
+    ]
+    for test in tests:
+        hits = [p for p in projs if test(p)]
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            raise UserError(f"{arg!r} matches several projects: {', '.join(p.name for p in hits)}")
+    raise UserError(f"no linked project matches {arg!r}; linked: {', '.join(p.name for p in projs)}"
+                    "\n(`vault-sync list` shows them; `vault-sync link` adds one)")
+
+
+def find_note_file(name: str) -> Path:
+    for p in PROJECTS_DIR.glob("*.md"):
+        if p.stem.lower() == name.lower():
+            return p
+    return PROJECTS_DIR / f"{name}.md"
+
+
+def find_repos(root: Path, depth: int = 2) -> list[Path]:
+    """Git repos under root, not descending into a repo (so submodules and worktrees stay out)."""
+    out: list[Path] = []
+
+    def walk(d: Path, level: int) -> None:
+        try:
+            entries = sorted(d.iterdir())
+        except OSError:
+            return
+        for e in entries:
+            if not e.is_dir() or e.name.startswith("."):
+                continue
+            if (e / ".git").exists():
+                out.append(e)
+            elif level < depth:
+                walk(e, level + 1)
+
+    walk(root, 1)
+    return out
+
+
+# ----------------------------------------------------------------------------- local repo facts
+def worktrees(repo: Path) -> list[dict]:
+    out = []
+    porcelain = git(repo, "worktree", "list", "--porcelain")
+    cur: dict = {}
+    for line in porcelain.splitlines() + [""]:
+        if not line:
+            if cur:
+                out.append(cur)
+            cur = {}
+        elif line.startswith("worktree "):
+            cur["path"] = Path(line[9:])
+        elif line.startswith("branch "):
+            cur["branch"] = line[7:].replace("refs/heads/", "")
+        elif line == "detached":
+            cur["branch"] = "(detached)"
+        elif line == "locked" or line.startswith("locked "):
+            cur["locked"] = True
+    rows = []
+    for wt in out:
+        if wt.get("path") == repo.resolve() or wt.get("path") == repo:
+            continue
+        p = wt["path"]
+        last = git(p, "log", "-1", "--date=short", "--format=%ad %s") if p.exists() else "(missing)"
+        dirty = len(git(p, "status", "--porcelain").splitlines()) if p.exists() else 0
+        rows.append({"name": p.name, "branch": wt.get("branch", "?"), "last": last, "dirty": dirty,
+                     "locked": wt.get("locked", False)})
+    return rows
+
+
+def collect(repo: Path, days: int) -> dict:
+    last_commit = git(repo, "log", "-1", "--date=short", "--format=%ad%x09%s")
+    date, _, subject = last_commit.partition("\t")
+    latest, recent = session_activity(repo, days)
+
+    def read(name: str) -> str:
+        f = repo / name
+        return f.read_text(encoding="utf-8", errors="replace") if f.is_file() else ""
+
+    return {
+        "name": repo.name,
+        "path": repo,
+        "home_path": home_path(repo),
+        "branch": git(repo, "branch", "--show-current") or git(repo, "rev-parse", "--short", "HEAD") or "?",
+        "remote": git(repo, "remote", "get-url", "origin"),
+        "last_commit_date": date,
+        "last_commit_subject": subject,
+        "days": days,
+        "commits_recent": git(repo, "rev-list", "--count", f"--since={days} days ago", "HEAD") or "0",
+        "dirty": len(git(repo, "status", "--porcelain").splitlines()),
+        "session_latest": latest,
+        "sessions_recent": recent,
+        "worktrees": worktrees(repo),
+        "claude_md": read("CLAUDE.md"),
+        "todo_md": read("TODO.md"),
+        "readme": read("README.md"),
+    }
+
+
+# ----------------------------------------------------------------------------- rendering: local
+def render_block(info: dict, now: dt.datetime, for_note: bool = True) -> str:
+    days = info["days"]
+    rows = [
+        ("Repo", f"`{info['home_path']}`" + (f" ({info['remote']})" if info["remote"] else "")),
+        ("Branch", f"`{info['branch']}`"),
+        ("Last commit", f"{info['last_commit_date']} {md_cell(info['last_commit_subject'])}".strip() or "none"),
+        (f"Commits, last {days} days", info["commits_recent"]),
+        ("Uncommitted files", str(info["dirty"])),
+        ("Last agent session",
+         (info["session_latest"].strftime("%Y-%m-%d %H:%M") if info["session_latest"] else "none")
+         + f" ({info['sessions_recent']} session{'' if info['sessions_recent'] == 1 else 's'} in {days} days)"),
+    ]
+    table = "| | |\n|---|---|\n" + "\n".join(f"| {k} | {v} |" for k, v in rows)
+
+    if for_note:
+        parts = [
+            START,
+            "## Status (synced from WSL)",
+            f"> Generated by `vault-sync` on {now:%Y-%m-%d %H:%M}. This block is rewritten on every "
+            "sync; write your own notes in the sections above.",
+            "",
+            table,
+        ]
+    else:
+        parts = ["## Local repo", "", table]
+    if info["worktrees"]:
+        parts += ["", "### Worktrees in flight"]
+        for wt in info["worktrees"]:
+            flags = []
+            if wt["dirty"]:
+                flags.append(f"{wt['dirty']} uncommitted")
+            if wt["locked"]:
+                flags.append("locked")
+            suffix = f" [{', '.join(flags)}]" if flags else ""
+            parts.append(f"- `{wt['branch']}` ({wt['name']}): {wt['last']}{suffix}")
+
+    sections = pick_sections(info["claude_md"], CLAUDE_MD_HEADINGS, "CLAUDE.md")
+    sections += pick_sections(info["todo_md"], TODO_MD_HEADINGS, "TODO.md")
+    if sections:
+        parts += [""] + ["\n\n".join(sections)]
+    elif info["claude_md"]:
+        parts += ["", "*CLAUDE.md has no progress/status section yet.*"]
+    else:
+        parts += ["", "*No CLAUDE.md in this repo.*"]
+    if for_note:
+        parts.append(END)
+    return "\n".join(parts)
+
+
+def new_note(name: str, desc: str) -> str:
+    terms = {name, name.replace("_", " "), name.replace("-", " ")}
+    search = " OR ".join(f'"{t}"' if " " in t else t for t in sorted(terms))
+    return "\n".join([
+        "---",
+        "type: project",
+        "tags:",
+        "  - project",
+        "---",
+        desc,
+        "",
+        "## Notes",
+        "",
+        "## Timeline",
+        "```dataview",
+        f"LIST FROM [[{name}]] AND \"Daily\"",
+        "SORT file.name DESC",
+        "```",
+        "",
+        "## Other mentions (search)",
+        "```query",
+        f"path:Daily ({search})",
+        "```",
+        "",
+    ])
+
+
+def upsert_block(text: str, block: str, start: str, end: str, after: str | None = None) -> str:
+    if start in text and end in text:
+        pre, _, rest = text.partition(start)
+        _, _, post = rest.partition(end)
+        return pre + block + post
+    if after and after in text:
+        pre, _, post = text.partition(after)
+        return pre + after + "\n\n" + block + post
+    # no markers yet: put the block before ## Timeline if present, else append
+    m = re.search(r"^## Timeline\s*$", text, re.M)
+    if m:
+        return text[:m.start()].rstrip("\n") + "\n\n" + block + "\n\n" + text[m.start():]
+    return text.rstrip("\n") + "\n\n" + block + "\n"
+
+
+def remove_block(text: str, start: str, end: str) -> str:
+    if start not in text or end not in text:
+        return text
+    pre, _, rest = text.partition(start)
+    _, _, post = rest.partition(end)
+    return pre.rstrip("\n") + "\n\n" + post.lstrip("\n")
+
+
+def strip_blocks(text: str) -> str:
+    return remove_block(remove_block(text, START, END), GH_START, GH_END)
+
+
+def write_note(path: Path, content: str, dry_run: bool) -> None:
+    if not content.endswith("\n"):
+        content += "\n"
+    if dry_run:
+        return
+    fd, tmp = tempfile.mkstemp(prefix=".vault-sync-", suffix=".md", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def sync_local(proj: Project, now: dt.datetime, days: int, dry_run: bool) -> str:
+    if not proj.repo_ok:
+        return f"local repo {proj.repo} not found; skipped"
+    info = collect(proj.repo, days)
+    text = upsert_block(read_note(proj.path), render_block(info, now), START, END)
+    text = set_fm(text, {
+        "repo": info["home_path"],
+        "branch": info["branch"],
+        "last_commit": info["last_commit_date"] or '""',
+        "worktrees": str(len(info["worktrees"])),
+        "synced": now.strftime("%Y-%m-%dT%H:%M"),
+    })
+    write_note(proj.path, text, dry_run)
+    return ("would update" if dry_run else "updated") + " local block"
+
+
+# ----------------------------------------------------------------------------- GitHub
+GH_REPO_QUERY = """
+query($owner: String!, $name: String!, $since: GitTimestamp!,
+      $merged: String!, $open: String!, $issues: String!, $n: Int!) {
+  repository(owner: $owner, name: $name) {
+    isArchived
+    defaultBranchRef { name target { ... on Commit { history(since: $since) { totalCount } } } }
+  }
+  merged: search(query: $merged, type: ISSUE, first: $n) {
+    issueCount nodes { ... on PullRequest { number title url author { login } mergedAt } }
+  }
+  open: search(query: $open, type: ISSUE, first: $n) {
+    issueCount nodes { ... on PullRequest { number title url author { login } updatedAt isDraft } }
+  }
+  issues: search(query: $issues, type: ISSUE, first: $n) {
+    issueCount nodes { ... on Issue { number title url author { login } updatedAt state } }
+  }
+}"""
+
+
+def gh_graphql(query: str, variables: dict) -> dict:
+    args = ["gh", "api", "graphql", "-f", f"query={query}"]
+    for k, v in variables.items():
+        args += ["-F" if isinstance(v, int) else "-f", f"{k}={v}"]
+    try:
+        out = subprocess.run(args, capture_output=True, text=True, timeout=90, check=False)
+    except (subprocess.SubprocessError, OSError) as e:
+        raise RuntimeError(f"gh: {e}") from e
+    try:
+        payload = json.loads(out.stdout or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict) or payload.get("data") is None:
+        errors = payload.get("errors", []) if isinstance(payload, dict) else []
+        msg = "; ".join(e.get("message", "") for e in errors) or out.stderr.strip() or "gh api failed"
+        raise RuntimeError(msg)
+    return payload["data"]
+
+
+def gh_activity(slug: str, filt: str, since: dt.date, n: int) -> dict:
+    owner, name = slug.split("/", 1)
+    q = f"repo:{slug} {filt}".strip()
+    d = since.isoformat()
+    queries = {
+        "merged": f"{q} is:pr is:merged merged:>={d} sort:updated-desc",
+        "open": f"{q} is:pr is:open updated:>={d} sort:updated-desc",
+        "issues": f"{q} is:issue updated:>={d} sort:updated-desc",
+    }
+    try:
+        data = gh_graphql(GH_REPO_QUERY, {"owner": owner, "name": name, "since": f"{d}T00:00:00Z",
+                                          **queries, "n": n})
+    except RuntimeError as e:
+        return {"slug": slug, "filter": filt, "error": str(e)}
+    return {"slug": slug, "filter": filt, "queries": queries, **data}
+
+
+def tracked_links(text: str) -> list[tuple[str, str, int]]:
+    """(owner, repo, number) for each issue/PR URL written in the note, outside the synced blocks."""
+    seen: dict[tuple[str, str, int], None] = {}
+    for m in re.finditer(r"https://github\.com/([\w.-]+)/([\w.-]+)/(?:issues|pull)/(\d+)", strip_blocks(text)):
+        seen[(m.group(1), m.group(2), int(m.group(3)))] = None
+    return list(seen)[:40]
+
+
+def fetch_tracked(links: list[tuple[str, str, int]]) -> list[dict]:
+    if not links:
+        return []
+    by_repo: dict[tuple[str, str], list[int]] = {}
+    for owner, name, num in links:
+        by_repo.setdefault((owner, name), []).append(num)
+    parts = []
+    for i, ((owner, name), nums) in enumerate(by_repo.items()):
+        fields = " ".join(
+            f"n{n}: issueOrPullRequest(number: {n}) {{ __typename "
+            f"... on Issue {{ title state updatedAt }} ... on PullRequest {{ title state updatedAt isDraft }} }}"
+            for n in nums)
+        parts.append(f'r{i}: repository(owner: "{owner}", name: "{name}") {{ {fields} }}')
+    try:
+        data = gh_graphql("query { " + " ".join(parts) + " }", {})
+        error = ""
+    except RuntimeError as e:
+        data, error = {}, str(e)
+    out = []
+    for i, ((owner, name), nums) in enumerate(by_repo.items()):
+        repo = data.get(f"r{i}") or {}
+        for n in nums:
+            node = repo.get(f"n{n}") or {}
+            kind = "pull" if node.get("__typename") == "PullRequest" else "issues"
+            out.append({"label": f"{owner}/{name}#{n}", "url": f"https://github.com/{owner}/{name}/{kind}/{n}",
+                        "title": node.get("title", ""), "state": (node.get("state") or "").lower(),
+                        "updated": (node.get("updatedAt") or "")[:10], "draft": node.get("isDraft", False),
+                        "error": "" if node else (error or "not found or no access")})
+    return out
+
+
+def render_github(acts: list[dict], tracked: list[dict], now: dt.datetime, days: int,
+                  since: dt.date, for_note: bool = True) -> str:
+    if for_note:
+        parts = [GH_START, "## GitHub activity (synced)",
+                 f"> Generated by `vault-sync --remotes` on {now:%Y-%m-%d %H:%M} for the last {days} days "
+                 f"(since {since}). Rewritten on every `--remotes` sync; write your own notes in the "
+                 "sections above."]
+    else:
+        parts = ["## GitHub activity"]
+    for a in acts:
+        parts += ["", f"### {a['slug']}"]
+        if a.get("error"):
+            parts.append(f"*Could not fetch: {a['error']}*")
+            continue
+        repo = a.get("repository")
+        if not repo:
+            parts.append("*Repository not found or no access.*")
+            continue
+        bits = ["**archived**"] if repo.get("isArchived") else []
+        ref = repo.get("defaultBranchRef") or {}
+        hist = ((ref.get("target") or {}).get("history") or {}).get("totalCount")
+        if hist is not None and not a.get("filter"):    # the commit count can't be filtered
+            bits.append(f"{hist} commits on `{ref.get('name')}`")
+        bits += [f"{a['merged']['issueCount']} PRs merged",
+                 f"{a['open']['issueCount']} open PRs with activity",
+                 f"{a['issues']['issueCount']} issues with activity"]
+        if a.get("filter"):
+            bits.append(f"filter `{a['filter']}`")
+        parts.append(" · ".join(bits))
+        for key, title, kind in (("merged", "Merged PRs", "pullrequests"),
+                                 ("open", "Open PRs with activity", "pullrequests"),
+                                 ("issues", "Issues with activity", "issues")):
+            res = a[key]
+            nodes = [x for x in res["nodes"] if x]
+            if not nodes:
+                continue
+            if key == "merged":
+                nodes.sort(key=lambda x: x.get("mergedAt") or "", reverse=True)
+            parts += ["", f"**{title}**"]
+            for x in nodes:
+                who = (x.get("author") or {}).get("login", "ghost")
+                if key == "merged":
+                    meta = f"{who}, merged {x['mergedAt'][:10]}"
+                elif key == "open":
+                    meta = f"{who}, updated {x['updatedAt'][:10]}" + (", draft" if x.get("isDraft") else "")
+                else:
+                    meta = f"{x['state'].lower()}, {who}, updated {x['updatedAt'][:10]}"
+                parts.append(f"- [#{x['number']}]({x['url']}) {md_text(x['title'])} ({meta})")
+            more = res["issueCount"] - len(nodes)
+            if more > 0:
+                url = "https://github.com/search?" + urllib.parse.urlencode({"q": a["queries"][key], "type": kind})
+                parts.append(f"- *…and {more} more: [search on GitHub]({url})*")
+    if tracked:
+        parts += ["", "### Issues and PRs linked in this note"]
+        for t in tracked:
+            if t["error"]:
+                parts.append(f"- [{t['label']}]({t['url']}): *{t['error']}*")
+            else:
+                state = t["state"] + (" (draft)" if t["draft"] else "")
+                parts.append(f"- [{t['label']}]({t['url']}) {md_text(t['title'])} ({state}, updated {t['updated']})")
+    if not acts and not tracked:
+        parts += ["", "*No remotes or GitHub links.*"]
+    if for_note:
+        parts.append(GH_END)
+    return "\n".join(parts)
+
+
+def github_section(proj: Project, text: str, now: dt.datetime, days: int, n: int, for_note: bool) -> str:
+    since = (now - dt.timedelta(days=days)).date()
+    acts = [gh_activity(slug, proj.filter, since, n) for slug in proj.remotes]
+    tracked = fetch_tracked(tracked_links(text))
+    return render_github(acts, tracked, now, days, since, for_note)
+
+
+def sync_github(proj: Project, now: dt.datetime, days: int, dry_run: bool) -> str:
+    text = read_note(proj.path)
+    block = github_section(proj, text, now, days, NOTE_ITEMS, for_note=True)
+    write_note(proj.path, upsert_block(text, block, GH_START, GH_END, after=END), dry_run)
+    return ("would update" if dry_run else "updated") + " GitHub block"
+
+
+# ----------------------------------------------------------------------------- report
+def search_terms(body: str) -> list[str]:
+    """The terms of the note's `query` block, e.g. `path:Daily (MORI OR anvil)` -> [MORI, anvil]."""
+    m = re.search(r"```query\s*\n(.*?)\n```", body, re.S)
+    if not m:
+        return []
+    q = re.sub(r"\bpath:\S+", " ", m.group(1)).replace("(", " ").replace(")", " ")
+    terms = [t.strip().strip('"').strip() for t in re.split(r"\s+OR\s+", q.strip())]
+    return [t for t in terms if t and not t.startswith("-")]
+
+
+def daily_mentions(proj_name: str, terms: list[str], since: dt.date) -> list[str]:
+    """Daily-note lines in the window that link or mention the project, with standup owner and context."""
+    pats = [re.compile(r"\[\[" + re.escape(proj_name) + r"[|#\]]", re.I)]
+    pats += [re.compile(r"(?<!\w)" + re.escape(t) + r"(?!\w)", re.I) for t in terms]
+    out = []
+    for f in sorted(DAILY_DIR.glob("*.md")):
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", f.stem) or f.stem < since.isoformat():
+            continue
+        try:
+            _, body = split_frontmatter(read_note(f))
+        except OSError:
+            continue
+        person, person_indent = None, -1
+        ancestors: list[tuple[int, str]] = []
+        for line in body.splitlines():
+            if not line.strip() or line.startswith("mentions::"):
+                continue
+            expanded = line.expandtabs(4)
+            indent = (len(expanded) - len(expanded.lstrip())) // 4
+            stripped = line.strip()
+            ancestors = [(i, s) for i, s in ancestors if i < indent]
+            if indent <= person_indent:
+                person, person_indent = None, -1
+            h = re.match(r"^(?:[-*]\s+)?\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]\s*:\s*(.*)$", stripped)
+            if h and h.group(1).lower() != proj_name.lower():
+                person, person_indent = h.group(1), indent
+                ancestors.append((indent, stripped))
+                if not (h.group(2) and any(p.search(h.group(2)) for p in pats)):
+                    continue
+                stripped = h.group(2)
+            if any(p.search(stripped) for p in pats):
+                ctx = [s for i, s in ancestors if i > max(person_indent, 0)]
+                who = f"[[{person}]]: " if person else ""
+                out.append(f"- [[{f.stem}]] {who}{' › '.join(ctx + [stripped])}")
+            if not h:
+                ancestors.append((indent, stripped))
+    return out
+
+
+def notes_section(body: str) -> str:
+    """The user-written `## Notes` section of a project note."""
+    m = re.search(r"^## Notes\s*$(.*?)(?=^## |\Z)", strip_blocks(body), re.M | re.S)
+    return m.group(1).strip() if m else ""
+
+
+def fetch(repo: Path) -> str:
+    if not git(repo, "remote"):
+        return ""
+    try:
+        ok = subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", "--all"],
+                            capture_output=True, timeout=180, check=False).returncode == 0
+    except (subprocess.SubprocessError, OSError):
+        ok = False
+    return f"*git fetch {'done' if ok else 'failed; remote branches may be stale'}*"
+
+
+def report(proj: Project, now: dt.datetime, days: int, do_fetch: bool) -> str:
+    since = (now - dt.timedelta(days=days)).date()
+    text = read_note(proj.path)
+    _, body = split_frontmatter(text)
+    out = [f"# {proj.name}", f"Note: Projects/{proj.path.name}", f"Window: last {days} days (since {since})"]
+    if proj.repo:
+        out.append(f"Repo: {home_path(proj.repo)}")
+    if proj.remotes:
+        out.append(f"Remotes: {', '.join(proj.remotes)}" + (f" (filter: {proj.filter})" if proj.filter else ""))
+    desc = first_paragraph(strip_blocks(body))
+    if desc:
+        out += ["", desc]
+    notes = notes_section(body)
+    if notes:
+        out += ["", "## Notes (vault)", notes]
+
+    if proj.repo:
+        out.append("")
+        if not proj.repo_ok:
+            out.append(f"## Local repo\n*Not found: {proj.repo}*")
+        else:
+            msg = fetch(proj.repo) if do_fetch else ""
+            if msg:
+                out += [msg, ""]
+            out.append(render_block(collect(proj.repo, days), now, for_note=False))
+            log_lines = git(proj.repo, "log", "--branches", "--remotes", f"--since={since.isoformat()}",
+                            "--date=short", "--format=%ad %an: %s", "-n", str(REPORT_COMMITS + 1)).splitlines()
+            out += ["", f"### Commits since {since} (all branches)"]
+            out += [f"- {ln}" for ln in log_lines[:REPORT_COMMITS]] or ["*none*"]
+            if len(log_lines) > REPORT_COMMITS:
+                out.append(f"- *… more, see `git log --since={since}`*")
+
+    if proj.remotes or tracked_links(text):
+        out += ["", github_section(proj, text, now, days, REPORT_ITEMS, for_note=False)]
+
+    mentions = daily_mentions(proj.name, search_terms(body), since)
+    out += ["", f"## Daily notes ({len(mentions)} lines)"]
+    out += mentions[:REPORT_MENTIONS] or ["*no mentions in the window*"]
+    if len(mentions) > REPORT_MENTIONS:
+        out.append(f"- *… {len(mentions) - REPORT_MENTIONS} more*")
+    return "\n".join(out)
+
+
+# ----------------------------------------------------------------------------- commands
+def cmd_sync(args, now: dt.datetime) -> int:
+    projs = projects()
+    if args.repo:
+        projs = [resolve(r, projs) for r in args.repo]
+    if not projs:
+        log("no linked projects; see `vault-sync list`")
+    for proj in projs:
+        try:
+            if proj.repo:
+                log(f"{proj.name}: {sync_local(proj, now, args.days, args.dry_run)}")
+            if args.remotes and (proj.remotes or tracked_links(read_note(proj.path))):
+                log(f"{proj.name}: {sync_github(proj, now, args.days, args.dry_run)}")
+        except Exception as e:  # one bad note must not stop the rest
+            print(f"vault-sync: {proj.name}: {e}", file=sys.stderr)
+    return 0
+
+
+def cmd_hook(now: dt.datetime) -> int:
+    try:
+        payload = json.loads(sys.stdin.read() or "{}") if not sys.stdin.isatty() else {}
+    except (ValueError, OSError):
+        payload = {}
+    cwd = Path(payload.get("cwd") or os.getcwd()) if isinstance(payload, dict) else Path.cwd()
+    root = main_repo_root(cwd)
+    if root is None:
+        return 0
+    for proj in projects():
+        if proj.repo and same_path(proj.repo, root):
+            log(f"{proj.name}: {sync_local(proj, now, RECENT_DAYS, False)}")
+    return 0
+
+
+def cmd_list(args, now: dt.datetime) -> int:
+    projs = projects()
+    print("Linked projects (repo / remotes frontmatter in Projects/*.md):")
+    w = max((len(p.name) for p in projs), default=10)
+    for p in projs:
+        repo = home_path(p.repo) if p.repo else "-"
+        if p.repo and not p.repo_ok:
+            repo += " (missing)"
+        extra = ", ".join(p.remotes) + (f"  [{p.filter}]" if p.filter else "")
+        print(f"  {p.name:<{w}}  {repo:<28}  {extra}".rstrip())
+    linked = [p.repo for p in projs if p.repo]
+    unlinked = [r for r in find_repos(REPOS_ROOT) if not any(same_path(r, l) for l in linked)]
+    print(f"\nGit repos under {home_path(REPOS_ROOT)} that no note links (not projects):")
+    for r in unlinked:
+        origin = gh_slug(git(r, "remote", "get-url", "origin")) or ""
+        print(f"  {home_path(r):<44} {origin}".rstrip())
+    print('\nLink one:  vault-sync link ~/repos/<dir> [--note "Note name"] [--remote OWNER/REPO]')
+    return 0
+
+
+def cmd_link(args, now: dt.datetime) -> int:
+    repo = None
+    if args.path:
+        p = Path(os.path.expanduser(args.path))
+        if not p.exists() and "/" not in args.path:
+            p = REPOS_ROOT / args.path
+        repo = main_repo_root(p) if p.exists() else None
+        if repo is None:
+            raise UserError(f"{args.path}: not a git repo")
+    remotes = []
+    for r in args.remote:
+        slug = gh_slug(r)
+        if not slug:
+            raise UserError(f"{r}: expected OWNER/REPO or a github.com URL")
+        remotes.append(slug)
+    if repo is None and not remotes and args.filter is None:
+        raise UserError("nothing to link: give a PATH, --remote or --filter")
+    name = args.note or (repo.name if repo else None)
+    if not name:
+        raise UserError("--note is required when linking only remotes")
+    if "/" in name:
+        raise UserError("--note is a note name, not a path")
+    note = find_note_file(name)
+
+    if repo:
+        for p in projects():
+            if p.repo and same_path(p.repo, repo) and p.path != note:
+                raise UserError(f"{home_path(repo)} is already linked to {p.name}; unlink it there first")
+    if note.exists():
+        text = read_note(note)
+        cur = Project(note, split_frontmatter(text)[0] or [])
+        if repo and cur.repo and not same_path(cur.repo, repo):
+            raise UserError(f"{note.stem} already links {home_path(cur.repo)}; unlink it first")
+        action = "linked"
+    else:
+        desc = ""
+        if repo:
+            for f in ("CLAUDE.md", "README.md"):
+                if (repo / f).is_file():
+                    desc = first_paragraph((repo / f).read_text(encoding="utf-8", errors="replace"))
+                    if desc:
+                        break
+        text = new_note(name, desc)
+        cur = Project(note, [])
+        action = "created"
+
+    values: dict = {}
+    if repo:
+        values["repo"] = home_path(repo)
+    if remotes:
+        values["remotes"] = [f"https://github.com/{s}" for s in dict.fromkeys(cur.remotes + remotes)]
+    if args.filter is not None:
+        values["remote_filter"] = yaml_quote(args.filter) if args.filter else None
+    write_note(note, set_fm(text, values), args.dry_run)
+    what = [home_path(repo)] if repo else []
+    what += remotes + ([f"filter {args.filter!r}"] if args.filter else [])
+    print(f"{'would have ' if args.dry_run else ''}{action} Projects/{note.name}: {', '.join(what)}")
+
+    if repo and not args.dry_run:
+        proj = Project(note, split_frontmatter(read_note(note))[0] or [])
+        print(f"{proj.name}: {sync_local(proj, now, RECENT_DAYS, False)}")
+        origin = gh_slug(git(repo, "remote", "get-url", "origin"))
+        if origin and origin not in proj.remotes:
+            print(f"hint: origin is github.com/{origin}; add it with --remote {origin} to track its PRs and issues")
+    return 0
+
+
+def cmd_unlink(args, now: dt.datetime) -> int:
+    proj = resolve(args.note, projects())
+    text = remove_block(read_note(proj.path), START, END)
+    values: dict = {k: None for k in SYNC_KEYS}
+    if args.remotes:
+        text = remove_block(text, GH_START, GH_END)
+        values.update(remotes=None, remote_filter=None)
+    write_note(proj.path, set_fm(text, values), args.dry_run)
+    print(f"{'would have ' if args.dry_run else ''}unlinked Projects/{proj.path.name}"
+          + (" (repo and remotes)" if args.remotes else " (repo; remotes kept)"))
+    return 0
+
+
+def cmd_report(args, now: dt.datetime) -> int:
+    projs = projects()
+    chosen = projs if args.all else [resolve(n, projs) for n in args.notes]
+    if not chosen:
+        raise UserError("name a project, or use --all")
+    print("\n\n---\n\n".join(report(p, now, args.days, args.fetch) for p in chosen))
+    return 0
+
+
+# ----------------------------------------------------------------------------- main
+COMMANDS = {"sync", "hook", "list", "link", "unlink", "report"}
+
+
+def main(argv: list[str]) -> int:
+    global VERBOSE
+    if argv and argv[0] == "--hook":
+        argv = ["hook"] + argv[1:]
+    if not argv or (argv[0] not in COMMANDS and argv[0] not in ("-h", "--help")):
+        argv = ["sync"] + argv
+
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("-v", "--verbose", action="store_true")
+    common.add_argument("-n", "--dry-run", action="store_true")
+    ap = argparse.ArgumentParser(prog="vault-sync", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd")
+    s = sub.add_parser("sync", parents=[common], help="rewrite the synced blocks of linked notes")
+    s.add_argument("--repo", action="append", default=[], help="only this project (repeatable)")
+    s.add_argument("--remotes", action="store_true", help="also refresh the GitHub block via gh")
+    s.add_argument("--days", type=int, default=RECENT_DAYS, help="activity window")
+    sub.add_parser("hook", parents=[common], help="Claude Code Stop hook (reads JSON on stdin)")
+    sub.add_parser("list", parents=[common], help="linked projects and unlinked repos")
+    s = sub.add_parser("link", parents=[common], help="link a repo and/or GitHub remotes to a note")
+    s.add_argument("path", nargs="?", help="local repo (path, or a dir name under ~/repos)")
+    s.add_argument("--note", help="project note name (default: the repo dir name)")
+    s.add_argument("--remote", action="append", default=[], help="OWNER/REPO or URL (repeatable)")
+    s.add_argument("--filter", help="GitHub search qualifiers for this note's remotes ('' clears)")
+    s = sub.add_parser("unlink", parents=[common], help="remove a note's repo link")
+    s.add_argument("note")
+    s.add_argument("--remotes", action="store_true", help="also remove remotes and the GitHub block")
+    s = sub.add_parser("report", parents=[common], help="print a status dossier (no vault writes)")
+    s.add_argument("notes", nargs="*")
+    s.add_argument("--all", action="store_true", help="every linked project")
+    s.add_argument("--days", type=int, default=RECENT_DAYS)
+    s.add_argument("--fetch", action="store_true", help="git fetch linked repos first")
+    args = ap.parse_args(argv)
+    VERBOSE = args.verbose
+
+    if not PROJECTS_DIR.is_dir():
+        if args.cmd in ("sync", "hook"):
+            log(f"vault not reachable at {VAULT}; nothing done")
+            return 0
+        raise UserError(f"vault not reachable at {VAULT}")
+
+    now = dt.datetime.now()
+    handler = {"sync": cmd_sync, "list": cmd_list, "link": cmd_link,
+               "unlink": cmd_unlink, "report": cmd_report}
+    if args.cmd in ("list", "report"):
+        return handler[args.cmd](args, now)
+    LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOCK_FILE, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)     # serialise concurrent hook runs
+        if args.cmd == "hook":
+            return cmd_hook(now)
+        return handler[args.cmd](args, now)
+
+
+VERBOSE = False
+
+if __name__ == "__main__":
+    hook_mode = len(sys.argv) > 1 and sys.argv[1] in ("--hook", "hook")
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Exception as e:  # UserError and anything unexpected; a hook must never fail
+        print(f"vault-sync: {e}", file=sys.stderr)
+        sys.exit(0 if hook_mode else 1)
