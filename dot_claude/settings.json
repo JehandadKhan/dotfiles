@@ -21,7 +21,8 @@
   "feedbackDrafts": "off",
   "hooks": {
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "~/.claude/notify.sh done" }] }
+      { "hooks": [{ "type": "command", "command": "~/.claude/notify.sh done" }] },
+      { "hooks": [{ "type": "command", "command": "~/.local/bin/vault-sync --hook", "timeout": 60 }] }
     ],
     "Notification": [
       { "hooks": [{ "type": "command", "command": "~/.claude/notify.sh 'needs input'" }] }

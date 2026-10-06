@@ -24,7 +24,7 @@ Directories in `~/repos` that no note links are not projects. Ignore them.
    The report prints:
    - the note's description and Notes section
    - local repo state, CLAUDE.md/TODO.md status sections and commits in the window
-   - GitHub activity (merged PRs, open PRs and issues with activity), plus the state of issue/PR links written in the note
+   - PRs merged on GitHub in the window, plus the state of issue/PR links written in the note
    - daily-note lines that mention the project, with their standup owner
 
    If it says no linked project matches, run `vault-sync list` and ask the user what to link (see Linking).

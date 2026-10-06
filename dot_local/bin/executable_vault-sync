@@ -13,8 +13,8 @@ Commands (`sync` is the default):
   vault-sync [sync] [--repo X ...] [--remotes] [--days N] [-v] [-n]
       Rewrite the local block of every linked note (git state, worktrees, the status sections
       of the repo's CLAUDE.md and TODO.md), or only X (note name, repo dir name or path).
-      --remotes also rewrites the GitHub block via `gh`: PRs merged, open PRs and issues with
-      activity in the last N days, and the state of the issue/PR links written in the note.
+      --remotes also rewrites the GitHub block via `gh`: PRs merged in the last N days, and
+      the state of the issue/PR links written in the note.
   vault-sync --hook
       Claude Code Stop hook: read the hook JSON on stdin and sync only the linked repo that
       contains the session's cwd. Never calls GitHub, always exits 0.
@@ -611,20 +611,10 @@ def sync_local(proj: Project, now: dt.datetime, days: int, dry_run: bool) -> str
 
 # ----------------------------------------------------------------------------- GitHub
 GH_REPO_QUERY = """
-query($owner: String!, $name: String!, $since: GitTimestamp!,
-      $merged: String!, $open: String!, $issues: String!, $n: Int!) {
-  repository(owner: $owner, name: $name) {
-    isArchived
-    defaultBranchRef { name target { ... on Commit { history(since: $since) { totalCount } } } }
-  }
+query($owner: String!, $name: String!, $merged: String!, $n: Int!) {
+  repository(owner: $owner, name: $name) { isArchived }
   merged: search(query: $merged, type: ISSUE, first: $n) {
     issueCount nodes { ... on PullRequest { number title url author { login } mergedAt } }
-  }
-  open: search(query: $open, type: ISSUE, first: $n) {
-    issueCount nodes { ... on PullRequest { number title url author { login } updatedAt isDraft } }
-  }
-  issues: search(query: $issues, type: ISSUE, first: $n) {
-    issueCount nodes { ... on Issue { number title url author { login } updatedAt state } }
   }
 }"""
 
@@ -652,17 +642,12 @@ def gh_activity(slug: str, filt: str, since: dt.date, n: int) -> dict:
     owner, name = slug.split("/", 1)
     q = f"repo:{slug} {filt}".strip()
     d = since.isoformat()
-    queries = {
-        "merged": f"{q} is:pr is:merged merged:>={d} sort:updated-desc",
-        "open": f"{q} is:pr is:open updated:>={d} sort:updated-desc",
-        "issues": f"{q} is:issue updated:>={d} sort:updated-desc",
-    }
+    query = f"{q} is:pr is:merged merged:>={d} sort:updated-desc"
     try:
-        data = gh_graphql(GH_REPO_QUERY, {"owner": owner, "name": name, "since": f"{d}T00:00:00Z",
-                                          **queries, "n": n})
+        data = gh_graphql(GH_REPO_QUERY, {"owner": owner, "name": name, "merged": query, "n": n})
     except RuntimeError as e:
         return {"slug": slug, "filter": filt, "error": str(e)}
-    return {"slug": slug, "filter": filt, "queries": queries, **data}
+    return {"slug": slug, "filter": filt, "query": query, **data}
 
 
 def tracked_links(text: str) -> list[tuple[str, str, int]]:
@@ -722,40 +707,20 @@ def render_github(acts: list[dict], tracked: list[dict], now: dt.datetime, days:
         if not repo:
             parts.append("*Repository not found or no access.*")
             continue
+        res = a["merged"]
+        nodes = sorted((x for x in res["nodes"] if x), key=lambda x: x.get("mergedAt") or "", reverse=True)
         bits = ["**archived**"] if repo.get("isArchived") else []
-        ref = repo.get("defaultBranchRef") or {}
-        hist = ((ref.get("target") or {}).get("history") or {}).get("totalCount")
-        if hist is not None and not a.get("filter"):    # the commit count can't be filtered
-            bits.append(f"{hist} commits on `{ref.get('name')}`")
-        bits += [f"{a['merged']['issueCount']} PRs merged",
-                 f"{a['open']['issueCount']} open PRs with activity",
-                 f"{a['issues']['issueCount']} issues with activity"]
+        bits.append(f"{res['issueCount']} PRs merged")
         if a.get("filter"):
             bits.append(f"filter `{a['filter']}`")
         parts.append(" · ".join(bits))
-        for key, title, kind in (("merged", "Merged PRs", "pullrequests"),
-                                 ("open", "Open PRs with activity", "pullrequests"),
-                                 ("issues", "Issues with activity", "issues")):
-            res = a[key]
-            nodes = [x for x in res["nodes"] if x]
-            if not nodes:
-                continue
-            if key == "merged":
-                nodes.sort(key=lambda x: x.get("mergedAt") or "", reverse=True)
-            parts += ["", f"**{title}**"]
-            for x in nodes:
-                who = (x.get("author") or {}).get("login", "ghost")
-                if key == "merged":
-                    meta = f"{who}, merged {x['mergedAt'][:10]}"
-                elif key == "open":
-                    meta = f"{who}, updated {x['updatedAt'][:10]}" + (", draft" if x.get("isDraft") else "")
-                else:
-                    meta = f"{x['state'].lower()}, {who}, updated {x['updatedAt'][:10]}"
-                parts.append(f"- [#{x['number']}]({x['url']}) {md_text(x['title'])} ({meta})")
-            more = res["issueCount"] - len(nodes)
-            if more > 0:
-                url = "https://github.com/search?" + urllib.parse.urlencode({"q": a["queries"][key], "type": kind})
-                parts.append(f"- *…and {more} more: [search on GitHub]({url})*")
+        for x in nodes:
+            who = (x.get("author") or {}).get("login", "ghost")
+            parts.append(f"- [#{x['number']}]({x['url']}) {md_text(x['title'])} ({who}, merged {x['mergedAt'][:10]})")
+        more = res["issueCount"] - len(nodes)
+        if more > 0:
+            url = "https://github.com/search?" + urllib.parse.urlencode({"q": a["query"], "type": "pullrequests"})
+            parts.append(f"- *…and {more} more: [search on GitHub]({url})*")
     if tracked:
         parts += ["", "### Issues and PRs linked in this note"]
         for t in tracked:
